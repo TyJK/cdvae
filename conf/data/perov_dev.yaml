@@ -1,4 +1,4 @@
-root_path: ${oc.env:PROJECT_ROOT}/data/perov_5
+root_path: ${oc.env:PROJECT_ROOT}/data/perov_5_dev
 prop: heat_ref
 num_targets: 1
 # prop: scaled_lattice
@@ -64,6 +64,6 @@ datamodule:
     test: 0
 
   batch_size:
-    train: 512
-    val: 256
+    train: 256
+    val: 128
     test: 128
