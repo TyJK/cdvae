@@ -1,5 +1,6 @@
 _target_: cdvae.pl_modules.gnn.DimeNetPlusPlusWrap
 num_targets: ${data.num_targets}
+use_pbc: False
 hidden_channels: 128
 num_blocks: 4
 int_emb_size: 64

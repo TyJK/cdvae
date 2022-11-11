@@ -301,6 +301,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
     def __init__(
         self,
         num_targets,
+        use_pbc=True,
         hidden_channels=128,
         num_blocks=4,
         int_emb_size=64,
@@ -317,7 +318,12 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         num_output_layers=3,
         readout='mean',
     ):
+        """
+        Args:
+         * otf_graph: compute graph on the fly
+        """
         self.num_targets = num_targets
+        self.use_pbc = use_pbc
         self.cutoff = cutoff
         self.max_num_neighbors = max_num_neighbors
         self.otf_graph = otf_graph
@@ -344,9 +350,10 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         batch = data.batch
 
         if self.otf_graph:
+            raise ValueError("OTF Graph activated but radius_graph_pbc_wrapper not yet adjusted to remove pbc")
             edge_index, cell_offsets, neighbors = radius_graph_pbc_wrapper(
                 data, self.cutoff, self.max_num_neighbors, data.num_atoms.device
-            )
+            )   # Computes pbc graph edges under pbc [periodic boundary conditions]
             data.edge_index = edge_index
             data.to_jimages = cell_offsets
             data.num_bonds = neighbors
@@ -355,7 +362,8 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             data.frac_coords,
             data.lengths,
             data.angles,
-            data.num_atoms)
+            data.num_atoms
+        )
 
         out = get_pbc_distances(
             data.frac_coords,
@@ -365,7 +373,8 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             data.to_jimages,
             data.num_atoms,
             data.num_bonds,
-            return_offsets=True
+            return_offsets=True,
+            use_pbc=self.use_pbc
         )
 
         edge_index = out["edge_index"]
@@ -381,10 +390,16 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         # Calculate angles.
         pos_i = pos[idx_i].detach()
         pos_j = pos[idx_j].detach()
-        pos_ji, pos_kj = (
-            pos[idx_j].detach() - pos_i + offsets[idx_ji],
-            pos[idx_k].detach() - pos_j + offsets[idx_kj],
-        )
+        if self.use_pbc:
+            pos_ji, pos_kj = (
+                pos[idx_j].detach() - pos_i + offsets[idx_ji],
+                pos[idx_k].detach() - pos_j + offsets[idx_kj],
+            )
+        else:
+            pos_ji, pos_kj = (
+                pos[idx_j].detach() - pos_i,
+                pos[idx_k].detach() - pos_j,
+            )
 
         a = (pos_ji * pos_kj).sum(dim=-1)
         b = torch.cross(pos_ji, pos_kj).norm(dim=-1)
