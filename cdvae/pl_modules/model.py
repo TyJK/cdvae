@@ -493,9 +493,8 @@ class CDVAE(BaseModule):
             noisy_frac_coords, batch.lengths, batch.angles, batch.num_atoms)
         target_cart_coords = frac_to_cart_coords(
             batch.frac_coords, batch.lengths, batch.angles, batch.num_atoms)
-        _, target_cart_coord_diff = min_distance_sqr_pbc(
-            target_cart_coords, noisy_cart_coords, batch.lengths, batch.angles,
-            batch.num_atoms, self.device, return_vector=True)
+        # simplification of logic in min_distance_sqr_pbc
+        target_cart_coord_diff = torch.sum((target_cart_coords-noisy_cart_coords)**2, dim=1)
 
         target_cart_coord_diff = target_cart_coord_diff / \
             used_sigmas_per_atom[:, None]**2
