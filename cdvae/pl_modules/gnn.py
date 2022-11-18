@@ -296,12 +296,9 @@ class DimeNetPlusPlus(torch.nn.Module):
         raise NotImplementedError
 
 
-@registry.register_model("dimenetplusplus")
 class DimeNetPlusPlusWrap(DimeNetPlusPlus):
     def __init__(
         self,
-        num_atoms,
-        bond_feat_dim,  # not used
         num_targets,
         use_pbc=True,
         regress_forces=True,
@@ -342,7 +339,6 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             num_output_layers=num_output_layers,
         )
 
-    @conditional_grad(torch.enable_grad())
     def _forward(self, data):
         pos = data.pos
         batch = data.batch

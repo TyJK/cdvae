@@ -16,6 +16,8 @@ from torch_sparse import SparseTensor
 from cdvae.common.data_utils import (
     get_pbc_distances, radius_graph_pbc, frac_to_cart_coords)
 
+from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
+
 from .layers.atom_update_block import OutputBlock
 from .layers.base_layers import Dense
 from .layers.efficient import EfficientInteractionDownProjection
@@ -201,7 +203,7 @@ class GemNetT(torch.nn.Module):
         ### ------------------------------------------------------------------------------------- ###
 
         # Embedding block
-        self.atom_emb = AtomEmbedding(emb_size_atom, num_elements)
+        self.atom_emb = AtomEmbedding(MAX_ATOMIC_NUM, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
         )
