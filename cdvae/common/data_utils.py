@@ -97,10 +97,10 @@ def build_crystal(crystal_str, niggli=True, primitive=False):
     canonical_crystal = Structure(
         lattice=Lattice.from_parameters(*crystal.lattice.parameters),
         species=crystal.species,
-        coords=crystal.frac_coords,
+        coords=crystal.coords,
         coords_are_cartesian=False,
     )
-    # match is gaurantteed because cif only uses lattice params & frac_coords
+    # match is gaurantteed because cif only uses lattice params & coords
     # assert canonical_crystal.matches(crystal)
     return canonical_crystal
 
@@ -117,7 +117,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     else:
         raise NotImplementedError
 
-    frac_coords = crystal.frac_coords
+    coords = crystal.coords
     atom_types = crystal.atomic_numbers
     lattice_parameters = crystal.lattice.parameters
     lengths = lattice_parameters[:3]
@@ -140,7 +140,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     to_jimages = np.array(to_jimages)
     num_atoms = atom_types.shape[0]
 
-    return frac_coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms
+    return coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms
 
 
 def abs_cap(val, max_abs_val=1):
@@ -156,117 +156,6 @@ def abs_cap(val, max_abs_val=1):
         val if abs(val) < 1 else sign of val * max_abs_val.
     """
     return max(min(val, max_abs_val), -max_abs_val)
-
-
-def lattice_params_to_matrix(a, b, c, alpha, beta, gamma):
-    """Converts lattice from abc, angles to matrix.
-    https://github.com/materialsproject/pymatgen/blob/b789d74639aa851d7e5ee427a765d9fd5a8d1079/pymatgen/core/lattice.py#L311
-    """
-    angles_r = np.radians([alpha, beta, gamma])
-    cos_alpha, cos_beta, cos_gamma = np.cos(angles_r)
-    sin_alpha, sin_beta, sin_gamma = np.sin(angles_r)
-
-    val = (cos_alpha * cos_beta - cos_gamma) / (sin_alpha * sin_beta)
-    # Sometimes rounding errors result in values slightly > 1.
-    val = abs_cap(val)
-    gamma_star = np.arccos(val)
-
-    vector_a = [a * sin_beta, 0.0, a * cos_beta]
-    vector_b = [
-        -b * sin_alpha * np.cos(gamma_star),
-        b * sin_alpha * np.sin(gamma_star),
-        b * cos_alpha,
-    ]
-    vector_c = [0.0, 0.0, float(c)]
-    return np.array([vector_a, vector_b, vector_c])
-
-
-def lattice_params_to_matrix_torch(lengths, angles):
-    """Batched torch version to compute lattice matrix from params.
-
-    lengths: torch.Tensor of shape (N, 3), unit A
-    angles: torch.Tensor of shape (N, 3), unit degree
-    """
-    angles_r = torch.deg2rad(angles)
-    coses = torch.cos(angles_r)
-    sins = torch.sin(angles_r)
-
-    val = (coses[:, 0] * coses[:, 1] - coses[:, 2]) / (sins[:, 0] * sins[:, 1])
-    # Sometimes rounding errors result in values slightly > 1.
-    val = torch.clamp(val, -1., 1.)
-    gamma_star = torch.arccos(val)
-
-    vector_a = torch.stack([
-        lengths[:, 0] * sins[:, 1],
-        torch.zeros(lengths.size(0), device=lengths.device),
-        lengths[:, 0] * coses[:, 1]], dim=1)
-    vector_b = torch.stack([
-        -lengths[:, 1] * sins[:, 0] * torch.cos(gamma_star),
-        lengths[:, 1] * sins[:, 0] * torch.sin(gamma_star),
-        lengths[:, 1] * coses[:, 0]], dim=1)
-    vector_c = torch.stack([
-        torch.zeros(lengths.size(0), device=lengths.device),
-        torch.zeros(lengths.size(0), device=lengths.device),
-        lengths[:, 2]], dim=1)
-
-    return torch.stack([vector_a, vector_b, vector_c], dim=1)
-
-
-def compute_volume(batch_lattice):
-    """Compute volume from batched lattice matrix
-
-    batch_lattice: (N, 3, 3)
-    """
-    vector_a, vector_b, vector_c = torch.unbind(batch_lattice, dim=1)
-    return torch.abs(torch.einsum('bi,bi->b', vector_a,
-                                  torch.cross(vector_b, vector_c, dim=1)))
-
-
-def lengths_angles_to_volume(lengths, angles):
-    lattice = lattice_params_to_matrix_torch(lengths, angles)
-    return compute_volume(lattice)
-
-
-def lattice_matrix_to_params(matrix):
-    lengths = np.sqrt(np.sum(matrix ** 2, axis=1)).tolist()
-
-    angles = np.zeros(3)
-    for i in range(3):
-        j = (i + 1) % 3
-        k = (i + 2) % 3
-        angles[i] = abs_cap(np.dot(matrix[j], matrix[k]) /
-                            (lengths[j] * lengths[k]))
-    angles = np.arccos(angles) * 180.0 / np.pi
-    a, b, c = lengths
-    alpha, beta, gamma = angles
-    return a, b, c, alpha, beta, gamma
-
-
-def frac_to_cart_coords(
-    frac_coords,
-    lengths,
-    angles,
-    num_atoms,
-):
-    lattice = lattice_params_to_matrix_torch(lengths, angles)
-    lattice_nodes = torch.repeat_interleave(lattice, num_atoms, dim=0)
-    pos = torch.einsum('bi,bij->bj', frac_coords, lattice_nodes)  # cart coords
-
-    return pos
-
-
-def cart_to_frac_coords(
-    cart_coords,
-    lengths,
-    angles,
-    num_atoms,
-):
-    lattice = lattice_params_to_matrix_torch(lengths, angles)
-    # use pinv in case the predicted lattice is not rank 3
-    inv_lattice = torch.linalg.pinv(lattice)
-    inv_lattice_nodes = torch.repeat_interleave(inv_lattice, num_atoms, dim=0)
-    frac_coords = torch.einsum('bi,bij->bj', cart_coords, inv_lattice_nodes)
-    return (frac_coords % 1.)
 
 
 def get_pbc_distances(
@@ -308,178 +197,6 @@ def get_pbc_distances(
         out["offsets"] = offsets[nonzero_idx]
 
     return out
-
-
-def radius_graph_pbc(
-    data, radius, max_num_neighbors_threshold, pbc=[True, True, True]
-):
-    device = data.pos.device
-    batch_size = len(data.natoms)
-
-    if hasattr(data, "pbc"):
-        data.pbc = torch.atleast_2d(data.pbc)
-        for i in range(3):
-            if not torch.any(data.pbc[:, i]).item():
-                pbc[i] = False
-            elif torch.all(data.pbc[:, i]).item():
-                pbc[i] = True
-            else:
-                raise RuntimeError(
-                    "Different structures in the batch have different PBC configurations. This is not currently supported."
-                )
-
-    # position of the atoms
-    atom_pos = data.pos
-
-    # Before computing the pairwise distances between atoms, first create a list of atom indices to compare for the entire batch
-    num_atoms_per_image = data.natoms
-    num_atoms_per_image_sqr = (num_atoms_per_image**2).long()
-
-    # index offset between images
-    index_offset = (
-        torch.cumsum(num_atoms_per_image, dim=0) - num_atoms_per_image
-    )
-
-    index_offset_expand = torch.repeat_interleave(
-        index_offset, num_atoms_per_image_sqr
-    )
-    num_atoms_per_image_expand = torch.repeat_interleave(
-        num_atoms_per_image, num_atoms_per_image_sqr
-    )
-
-    # Compute a tensor containing sequences of numbers that range from 0 to num_atoms_per_image_sqr for each image
-    # that is used to compute indices for the pairs of atoms. This is a very convoluted way to implement
-    # the following (but 10x faster since it removes the for loop)
-    # for batch_idx in range(batch_size):
-    #    batch_count = torch.cat([batch_count, torch.arange(num_atoms_per_image_sqr[batch_idx], device=device)], dim=0)
-    num_atom_pairs = torch.sum(num_atoms_per_image_sqr)
-    index_sqr_offset = (
-        torch.cumsum(num_atoms_per_image_sqr, dim=0) - num_atoms_per_image_sqr
-    )
-    index_sqr_offset = torch.repeat_interleave(
-        index_sqr_offset, num_atoms_per_image_sqr
-    )
-    atom_count_sqr = (
-        torch.arange(num_atom_pairs, device=device) - index_sqr_offset
-    )
-
-    # Compute the indices for the pairs of atoms (using division and mod)
-    # If the systems get too large this apporach could run into numerical precision issues
-    index1 = (
-        torch.div(
-            atom_count_sqr, num_atoms_per_image_expand, rounding_mode="floor"
-        )
-    ) + index_offset_expand
-    index2 = (
-        atom_count_sqr % num_atoms_per_image_expand
-    ) + index_offset_expand
-    # Get the positions for each atom
-    pos1 = torch.index_select(atom_pos, 0, index1)
-    pos2 = torch.index_select(atom_pos, 0, index2)
-
-    # Calculate required number of unit cells in each direction.
-    # Smallest distance between planes separated by a1 is
-    # 1 / ||(a2 x a3) / V||_2, since a2 x a3 is the area of the plane.
-    # Note that the unit cell volume V = a1 * (a2 x a3) and that
-    # (a2 x a3) / V is also the reciprocal primitive vector
-    # (crystallographer's definition).
-
-    cross_a2a3 = torch.cross(data.cell[:, 1], data.cell[:, 2], dim=-1)
-    cell_vol = torch.sum(data.cell[:, 0] * cross_a2a3, dim=-1, keepdim=True)
-
-    if pbc[0]:
-        inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
-        rep_a1 = torch.ceil(radius * inv_min_dist_a1)
-    else:
-        rep_a1 = data.cell.new_zeros(1)
-
-    if pbc[1]:
-        cross_a3a1 = torch.cross(data.cell[:, 2], data.cell[:, 0], dim=-1)
-        inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
-        rep_a2 = torch.ceil(radius * inv_min_dist_a2)
-    else:
-        rep_a2 = data.cell.new_zeros(1)
-
-    if pbc[2]:
-        cross_a1a2 = torch.cross(data.cell[:, 0], data.cell[:, 1], dim=-1)
-        inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
-        rep_a3 = torch.ceil(radius * inv_min_dist_a3)
-    else:
-        rep_a3 = data.cell.new_zeros(1)
-
-    # Take the max over all images for uniformity. This is essentially padding.
-    # Note that this can significantly increase the number of computed distances
-    # if the required repetitions are very different between images
-    # (which they usually are). Changing this to sparse (scatter) operations
-    # might be worth the effort if this function becomes a bottleneck.
-    max_rep = [rep_a1.max(), rep_a2.max(), rep_a3.max()]
-
-    # Tensor of unit cells
-    cells_per_dim = [
-        torch.arange(-rep, rep + 1, device=device, dtype=torch.float)
-        for rep in max_rep
-    ]
-    unit_cell = torch.cartesian_prod(*cells_per_dim)
-    num_cells = len(unit_cell)
-    unit_cell_per_atom = unit_cell.view(1, num_cells, 3).repeat(
-        len(index2), 1, 1
-    )
-    unit_cell = torch.transpose(unit_cell, 0, 1)
-    unit_cell_batch = unit_cell.view(1, 3, num_cells).expand(
-        batch_size, -1, -1
-    )
-
-    # Compute the x, y, z positional offsets for each cell in each image
-    data_cell = torch.transpose(data.cell, 1, 2)
-    pbc_offsets = torch.bmm(data_cell, unit_cell_batch)
-    pbc_offsets_per_atom = torch.repeat_interleave(
-        pbc_offsets, num_atoms_per_image_sqr, dim=0
-    )
-
-    # Expand the positions and indices for the 9 cells
-    pos1 = pos1.view(-1, 3, 1).expand(-1, -1, num_cells)
-    pos2 = pos2.view(-1, 3, 1).expand(-1, -1, num_cells)
-    index1 = index1.view(-1, 1).repeat(1, num_cells).view(-1)
-    index2 = index2.view(-1, 1).repeat(1, num_cells).view(-1)
-    # Add the PBC offsets for the second atom
-    pos2 = pos2 + pbc_offsets_per_atom
-
-    # Compute the squared distance between atoms
-    atom_distance_sqr = torch.sum((pos1 - pos2) ** 2, dim=1)
-    atom_distance_sqr = atom_distance_sqr.view(-1)
-
-    # Remove pairs that are too far apart
-    mask_within_radius = torch.le(atom_distance_sqr, radius * radius)
-    # Remove pairs with the same atoms (distance = 0.0)
-    mask_not_same = torch.gt(atom_distance_sqr, 0.0001)
-    mask = torch.logical_and(mask_within_radius, mask_not_same)
-    index1 = torch.masked_select(index1, mask)
-    index2 = torch.masked_select(index2, mask)
-    unit_cell = torch.masked_select(
-        unit_cell_per_atom.view(-1, 3), mask.view(-1, 1).expand(-1, 3)
-    )
-    unit_cell = unit_cell.view(-1, 3)
-    atom_distance_sqr = torch.masked_select(atom_distance_sqr, mask)
-
-    mask_num_neighbors, num_neighbors_image = get_max_neighbors_mask(
-        natoms=data.natoms,
-        index=index1,
-        atom_distance=atom_distance_sqr,
-        max_num_neighbors_threshold=max_num_neighbors_threshold,
-    )
-
-    if not torch.all(mask_num_neighbors):
-        # Mask out the atoms to ensure each atom has at most max_num_neighbors_threshold neighbors
-        index1 = torch.masked_select(index1, mask_num_neighbors)
-        index2 = torch.masked_select(index2, mask_num_neighbors)
-        unit_cell = torch.masked_select(
-            unit_cell.view(-1, 3), mask_num_neighbors.view(-1, 1).expand(-1, 3)
-        )
-        unit_cell = unit_cell.view(-1, 3)
-
-    edge_index = torch.stack((index2, index1))
-
-    return edge_index, unit_cell, num_neighbors_image
 
 
 def compute_neighbors(data, edge_index):
@@ -580,76 +297,6 @@ def get_max_neighbors_mask(
     return mask_num_neighbors, num_neighbors_image
 
 
-def min_distance_sqr_pbc(cart_coords1, cart_coords2, lengths, angles,
-                         num_atoms, device, return_vector=False,
-                         return_to_jimages=False):
-    """Compute the pbc distance between atoms in cart_coords1 and cart_coords2.
-    This function assumes that cart_coords1 and cart_coords2 have the same number of atoms
-    in each data point.
-    returns:
-        basic return:
-            min_atom_distance_sqr: (N_atoms, )
-        return_vector == True:
-            min_atom_distance_vector: vector pointing from cart_coords1 to cart_coords2, (N_atoms, 3)
-        return_to_jimages == True:
-            to_jimages: (N_atoms, 3), position of cart_coord2 relative to cart_coord1 in pbc
-    """
-    batch_size = len(num_atoms)
-
-    # Get the positions for each atom
-    pos1 = cart_coords1
-    pos2 = cart_coords2
-
-    unit_cell = torch.tensor(OFFSET_LIST, device=device).float()
-    num_cells = len(unit_cell)
-    unit_cell_per_atom = unit_cell.view(1, num_cells, 3).repeat(
-        len(cart_coords2), 1, 1
-    )
-    unit_cell = torch.transpose(unit_cell, 0, 1)
-    unit_cell_batch = unit_cell.view(1, 3, num_cells).expand(
-        batch_size, -1, -1
-    )
-
-    # lattice matrix
-    lattice = lattice_params_to_matrix_torch(lengths, angles)
-
-    # Compute the x, y, z positional offsets for each cell in each image
-    data_cell = torch.transpose(lattice, 1, 2)
-    pbc_offsets = torch.bmm(data_cell, unit_cell_batch)
-    pbc_offsets_per_atom = torch.repeat_interleave(
-        pbc_offsets, num_atoms, dim=0
-    )
-
-    # Expand the positions and indices for the 9 cells
-    pos1 = pos1.view(-1, 3, 1).expand(-1, -1, num_cells)
-    pos2 = pos2.view(-1, 3, 1).expand(-1, -1, num_cells)
-    # Add the PBC offsets for the second atom
-    pos2 = pos2 + pbc_offsets_per_atom
-
-    # Compute the vector between atoms
-    # shape (num_atom_squared_sum, 3, 27)
-    atom_distance_vector = pos1 - pos2
-    atom_distance_sqr = torch.sum(atom_distance_vector ** 2, dim=1)
-
-    min_atom_distance_sqr, min_indices = atom_distance_sqr.min(dim=-1)
-
-    return_list = [min_atom_distance_sqr]
-
-    if return_vector:
-        min_indices = min_indices[:, None, None].repeat([1, 3, 1])
-
-        min_atom_distance_vector = torch.gather(
-            atom_distance_vector, 2, min_indices).squeeze(-1)
-
-        return_list.append(min_atom_distance_vector)
-
-    if return_to_jimages:
-        to_jimages = unit_cell.T[min_indices].long()
-        return_list.append(to_jimages)
-
-    return return_list[0] if len(return_list) == 1 else return_list
-
-
 class StandardScalerTorch(object):
     """Normalizes the targets of a dataset."""
 
@@ -696,8 +343,7 @@ def get_scaler_from_data_list(data_list, key):
     return scaler
 
 
-def preprocess(input_file, num_workers, niggli, primitive, graph_method,
-               prop_list):
+def preprocess(input_file, num_workers, primitive, graph_method, prop_list):
     df = pd.read_csv(input_file)
 
     def process_one(row, niggli, primitive, graph_method, prop_list):
@@ -706,6 +352,8 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
             crystal_str, niggli=niggli, primitive=primitive)
         graph_arrays = build_crystal_graph(crystal, graph_method)
         properties = {k: row[k] for k in prop_list if k in row.keys()}
+
+        # import pdb; pdb.set_trace()
         result_dict = {
             'mp_id': row['material_id'],
             'cif': crystal_str,
@@ -714,11 +362,16 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         result_dict.update(properties)
         return result_dict
 
+    # TODO (jwhite) remove
+    ex = df.iloc[0]
+    # import pdb; pdb.set_trace()
+    ex = process_one(ex, True, False, "crystalnn", [])
+
     unordered_results = p_umap(
         process_one,
         [df.iloc[idx] for idx in range(len(df))],
-        [niggli] * len(df),
-        [primitive] * len(df),
+        [True] * len(df),
+        [False] * len(df),
         [graph_method] * len(df),
         [prop_list] * len(df),
         num_cpus=num_workers)
@@ -732,7 +385,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
 def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
     def process_one(batch_idx, crystal_array, niggli, primitive, graph_method):
-        frac_coords = crystal_array['frac_coords']
+        coords = crystal_array['coords']
         atom_types = crystal_array['atom_types']
         lengths = crystal_array['lengths']
         angles = crystal_array['angles']
@@ -740,7 +393,7 @@ def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
             lattice=Lattice.from_parameters(
                 *(lengths.tolist() + angles.tolist())),
             species=atom_types,
-            coords=frac_coords,
+            coords=coords,
             coords_are_cartesian=False)
         graph_arrays = build_crystal_graph(crystal, graph_method)
         result_dict = {

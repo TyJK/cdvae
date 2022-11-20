@@ -13,9 +13,6 @@ import torch.nn as nn
 from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
-from cdvae.common.data_utils import (
-    get_pbc_distances, radius_graph_pbc, frac_to_cart_coords)
-
 from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
 
 from .layers.atom_update_block import OutputBlock

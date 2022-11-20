@@ -1,4 +1,8 @@
 """This module is adapted from https://github.com/Open-Catalyst-Project/ocp/tree/master/ocpmodels/models"""
+try:
+    import sympy as sym
+except ImportError:
+    sym = None
 
 import torch
 import torch.nn as nn
@@ -15,16 +19,7 @@ from torch_sparse import SparseTensor
 
 from cdvae.pl_modules.gemnet.gemnet import GemNetT
 
-from cdvae.common.data_utils import (
-    compute_neighbors,
-    get_pbc_distances,
-    radius_graph_pbc,
-)
-
-try:
-    import sympy as sym
-except ImportError:
-    sym = None
+from cdvae.common.data_utils import compute_neighbors
 
 
 class InteractionPPBlock(torch.nn.Module):
@@ -347,8 +342,11 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         )
 
     def _forward(self, data):
+        data.pos = data.coords
+        data.natoms = data.num_atoms
         pos = data.pos
         batch = data.batch
+
         (
             edge_index,
             dist,
@@ -363,6 +361,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         data.neighbors = neighbors
         j, i = edge_index
 
+        data.atomic_numbers = data.atom_types
         _, _, idx_i, idx_j, idx_k, idx_kj, idx_ji = self.triplets(
             edge_index,
             data.cell_offsets,
@@ -537,9 +536,10 @@ class GemNetTEncoder(nn.Module):
 
     def forward(self, data):
         # (num_crysts, num_targets)
+        import pdb; pdb.set_trace()
         output = self.gemnet(
             z=None,
-            frac_coords=data.frac_coords,
+            coords=data.coords,
             atom_types=data.atom_types,
             num_atoms=data.num_atoms,
             lengths=data.lengths,
