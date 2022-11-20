@@ -15,6 +15,8 @@ from torch_sparse import SparseTensor
 
 from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
 
+from .base.base import BaseModel
+
 from .layers.atom_update_block import OutputBlock
 from .layers.base_layers import Dense
 from .layers.efficient import EfficientInteractionDownProjection
@@ -33,7 +35,7 @@ from .utils import (
 )
 
 
-class GemNetT(torch.nn.Module):
+class GemNetT(BaseModel):
     """
     GemNet-T, triplets-only variant of GemNet
 
