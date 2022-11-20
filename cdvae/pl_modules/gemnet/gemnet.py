@@ -201,6 +201,7 @@ class GemNetT(torch.nn.Module):
 
         # Embedding block
         self.atom_emb = AtomEmbedding(MAX_ATOMIC_NUM, emb_size_atom)
+        self.atom_latent_emb = nn.Linear(emb_size_atom + latent_dim, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
         )
@@ -484,7 +485,7 @@ class GemNetT(torch.nn.Module):
             id3_ragged_idx,
         )
 
-    def forward(self, data):
+    def forward(self, z, data):
         pos = data.pos
         batch = data.batch
         atomic_numbers = data.atomic_numbers.long()
@@ -512,6 +513,12 @@ class GemNetT(torch.nn.Module):
 
         # Embedding block
         h = self.atom_emb(atomic_numbers)
+        # Merge z and atom embedding
+        if z is not None:
+            z_per_atom = z.repeat_interleave(num_atoms, dim=0)
+            h = torch.cat([h, z_per_atom], dim=1)
+            h = self.atom_latent_emb(h)
+
         # (nAtoms, emb_size_atom)
         m = self.edge_emb(h, rbf, idx_s, idx_t)  # (nEdges, emb_size_edge)
 
@@ -586,7 +593,9 @@ class GemNetT(torch.nn.Module):
                     )[0]
                     # (nAtoms, 3)
 
-            return E_t, F_t  # (nMolecules, num_targets), (nAtoms, 3)
+            # return h for predicting atom types
+            return h, F_t  # (nMolecules, num_targets), (nAtoms, 3)
+
         else:
             return E_t
 
