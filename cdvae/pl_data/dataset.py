@@ -45,7 +45,7 @@ class CrystDataset(Dataset):
 
         data = Data(
             coords=torch.Tensor(data_dict["coords"]),
-            atom_types=torch.Tensor(data_dict["elements"]),
+            atom_types=torch.Tensor(data_dict["elements"]).long(),
             num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
             y=prop
         )

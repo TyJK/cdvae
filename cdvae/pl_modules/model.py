@@ -293,13 +293,10 @@ class CDVAE(BaseModule):
                 batch.num_atoms, dim=0))
 
         # add noise to atom types and sample atom types.
-        pred_composition_probs = F.softmax(
-            pred_composition_per_atom.detach(), dim=-1)
-        atom_type_probs = (
-            F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
-            pred_composition_probs * used_type_sigmas_per_atom[:, None])
-        rand_atom_types = torch.multinomial(
-            atom_type_probs, num_samples=1).squeeze(1) + 1
+        pred_composition_probs = F.softmax(pred_composition_per_atom.detach(), dim=-1)
+        atom_type_probs = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) + \
+                          pred_composition_probs * used_type_sigmas_per_atom[:, None]
+        rand_atom_types = torch.multinomial(atom_type_probs, num_samples=1).squeeze(1) + 1
 
         # add noise to the cart coords
         noises_per_atom = (torch.randn_like(batch.coords) * used_sigmas_per_atom[:, None])
