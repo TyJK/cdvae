@@ -21,7 +21,7 @@ from torch_sparse import SparseTensor
 
 from cdvae.pl_modules.gemnet.gemnet import GemNetT
 
-from cdvae.common.data_utils import compute_neighbors
+from cdvae.common.data_utils import compute_neighbors, radius_graph_pbc
 
 
 class InteractionPPBlock(torch.nn.Module):
@@ -473,11 +473,13 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             distance_vec = out["distance_vec"]
         else:
             if otf_graph:
-                edge_index = radius_graph(
-                    data.pos,
-                    r=cutoff,
-                    batch=data.batch,
-                    max_num_neighbors=max_neighbors,
+                # note: implementation via customized radius_graph_pbc was preferable to radius_graph
+                # the latter seems not to properly leverage max_neighbors
+                edge_index, num_neighbors_image = radius_graph_pbc(
+                    data,
+                    radius=cutoff,
+                    pbc=[False, False, False],
+                    max_num_neighbors_threshold=max_neighbors,
                 )
 
             j, i = edge_index
