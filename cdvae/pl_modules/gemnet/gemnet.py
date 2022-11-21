@@ -124,7 +124,7 @@ class GemNetT(BaseModel):
         envelope: dict = {"name": "polynomial", "exponent": 5},
         cbf: dict = {"name": "spherical_harmonics"},
         extensive: bool = False,
-        otf_graph: bool = False,
+        otf_graph: bool = True,
         use_pbc: bool = False,
         output_init: str = "HeOrthogonal",
         activation: str = "swish",
@@ -202,7 +202,7 @@ class GemNetT(BaseModel):
         ### ------------------------------------------------------------------------------------- ###
 
         # Embedding block
-        self.atom_emb = AtomEmbedding(MAX_ATOMIC_NUM, emb_size_atom)
+        self.atom_emb = AtomEmbedding(emb_size_atom, MAX_ATOMIC_NUM)
         self.atom_latent_emb = nn.Linear(emb_size_atom + latent_dim, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
@@ -441,36 +441,40 @@ class GemNetT(BaseModel):
             select_cutoff = None
         else:
             select_cutoff = self.cutoff
-        (edge_index, cell_offsets, neighbors, D_st, V_st,) = self.select_edges(
-            data=data,
-            edge_index=edge_index,
-            cell_offsets=cell_offsets,
-            neighbors=neighbors,
-            edge_dist=D_st,
-            edge_vector=V_st,
-            cutoff=select_cutoff,
-        )
+        # we ignore it because Xie ignores it
+        # (edge_index, cell_offsets, neighbors, D_st, V_st,) = self.select_edges(
+        #     data=data,
+        #     edge_index=edge_index,
+        #     cell_offsets=cell_offsets,
+        #     neighbors=neighbors,
+        #     edge_dist=D_st,
+        #     edge_vector=V_st,
+        #     cutoff=select_cutoff,
+        # )
 
-        (
-            edge_index,
-            cell_offsets,
-            neighbors,
-            D_st,
-            V_st,
-        ) = self.reorder_symmetric_edges(
-            edge_index, cell_offsets, neighbors, D_st, V_st
-        )
+        # TODO (jwhite) revisit
+        # (
+        #     edge_index,
+        #     cell_offsets,
+        #     neighbors,
+        #     D_st,
+        #     V_st,
+        # ) = self.reorder_symmetric_edges(
+        #     edge_index, cell_offsets, neighbors, D_st, V_st
+        # )
 
         # Indices for swapping c->a and a->c (for symmetric MP)
-        block_sizes = neighbors // 2
-        id_swap = repeat_blocks(
-            block_sizes,
-            repeats=2,
-            continuous_indexing=False,
-            start_idx=block_sizes[0],
-            block_inc=block_sizes[:-1] + block_sizes[1:],
-            repeat_inc=-block_sizes,
-        )
+        # TODO (jwhite) revisit
+        id_swap = torch.arange(edge_index.shape[1])
+        # block_sizes = neighbors // 2
+        # id_swap = repeat_blocks(
+        #     block_sizes,
+        #     repeats=2,
+        #     continuous_indexing=False,
+        #     start_idx=block_sizes[0],
+        #     block_inc=block_sizes[:-1] + block_sizes[1:],
+        #     repeat_inc=-block_sizes,
+        # )
 
         id3_ba, id3_ca, id3_ragged_idx = self.get_triplets(
             edge_index, num_atoms=num_atoms
@@ -514,15 +518,15 @@ class GemNetT(BaseModel):
         rbf = self.radial_basis(D_st)
 
         # Embedding block
-        h = self.atom_emb(atomic_numbers)
+        hidden = self.atom_emb(atomic_numbers)
         # Merge z and atom embedding
         if z is not None:
-            z_per_atom = z.repeat_interleave(num_atoms, dim=0)
-            h = torch.cat([h, z_per_atom], dim=1)
-            h = self.atom_latent_emb(h)
+            z_per_atom = z.repeat_interleave(data.num_atoms, dim=0)
+            hidden = torch.cat([hidden, z_per_atom], dim=1)
+            hidden = self.atom_latent_emb(hidden)
 
         # (nAtoms, emb_size_atom)
-        m = self.edge_emb(h, rbf, idx_s, idx_t)  # (nEdges, emb_size_edge)
+        m = self.edge_emb(hidden, rbf, idx_s, idx_t)  # (nEdges, emb_size_edge)
 
         rbf3 = self.mlp_rbf3(rbf)
         cbf3 = self.mlp_cbf3(rad_cbf3, cbf3, id3_ca, id3_ragged_idx)
@@ -530,13 +534,13 @@ class GemNetT(BaseModel):
         rbf_h = self.mlp_rbf_h(rbf)
         rbf_out = self.mlp_rbf_out(rbf)
 
-        E_t, F_st = self.out_blocks[0](h, m, rbf_out, idx_t)
+        E_t, F_st = self.out_blocks[0](hidden, m, rbf_out, idx_t)
         # (nAtoms, num_targets), (nEdges, num_targets)
 
         for i in range(self.num_blocks):
             # Interaction block
-            h, m = self.int_blocks[i](
-                h=h,
+            hidden, m = self.int_blocks[i](
+                h=hidden,
                 m=m,
                 rbf3=rbf3,
                 cbf3=cbf3,
@@ -549,7 +553,7 @@ class GemNetT(BaseModel):
                 idx_t=idx_t,
             )  # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
 
-            E, F = self.out_blocks[i + 1](h, m, rbf_out, idx_t)
+            E, F = self.out_blocks[i + 1](hidden, m, rbf_out, idx_t)
             # (nAtoms, num_targets), (nEdges, num_targets)
             F_st += F
             E_t += E
@@ -596,7 +600,7 @@ class GemNetT(BaseModel):
                     # (nAtoms, 3)
 
             # return h for predicting atom types
-            return h, F_t  # (nMolecules, num_targets), (nAtoms, 3)
+            return hidden, F_t  # (nMolecules, num_targets), (nAtoms, 3)
 
         else:
             return E_t

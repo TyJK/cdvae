@@ -42,32 +42,16 @@ class GemNetTDecoder(nn.Module):
         )
         self.fc_atom = nn.Linear(hidden_dim, MAX_ATOMIC_NUM)
 
-    def forward(self, z, pred_coords, pred_atom_types, num_atoms,
-                lengths, angles):
+    def forward(self, z, data):
         """
         args:
             z: (N_cryst, num_latent)
-            pred_coords: (N_atoms, 3)
-            pred_atom_types: (N_atoms, ), need to use atomic number e.g. H = 1
-            num_atoms: (N_cryst,)
-            lengths: (N_cryst, 3)
-            angles: (N_cryst, 3)
+            data: a torch geometric data object
         returns:
             atom_coords: (N_atoms, 3)
             atom_types: (N_atoms, MAX_ATOMIC_NUM)
         """
-        # (num_atoms, hidden_dim) (num_crysts, 3)
-        import pdb; pdb.set_trace()
-        h, pred_cart_coord_diff = self.gemnet(
-            z=z,
-            coords=pred_coords,
-            atom_types=pred_atom_types,
-            num_atoms=num_atoms,
-            lengths=lengths,
-            angles=angles,
-            edge_index=None,
-            to_jimages=None,
-            num_bonds=None,
-        )
+        h, pred_cart_coord_diff = self.gemnet(z=z, data=data)
         pred_atom_types = self.fc_atom(h)
+
         return pred_cart_coord_diff, pred_atom_types

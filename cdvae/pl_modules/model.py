@@ -303,12 +303,16 @@ class CDVAE(BaseModule):
         coords = batch.coords  # TODO simplify/remove
         noisy_coords = coords + noises_per_atom
 
-        pred_lengths, pred_angles = None, None
-        pred_coord_diff, pred_atom_types = self.decoder(z, noisy_coords, rand_atom_types, batch.num_atoms)
+        batch_cp = batch.clone()
+        batch_cp.pos = noisy_coords
+        batch_cp.atomic_numbers = rand_atom_types
+
+        pred_coord_diff, pred_atom_types = self.decoder(z, batch_cp)
 
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
         composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch)
+        import pdb; pdb.set_trace()
         coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch)
 
