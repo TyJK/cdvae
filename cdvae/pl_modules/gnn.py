@@ -7,6 +7,8 @@ except ImportError:
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
+
+from torch_geometric.nn import radius_graph
 from torch_geometric.nn.acts import swish
 from torch_geometric.nn.inits import glorot_orthogonal
 from torch_geometric.nn.models.dimenet import (
@@ -323,7 +325,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         self.use_pbc = use_pbc
         self.cutoff = cutoff
         self.otf_graph = otf_graph
-        self.max_neighbors = 50
+        self.max_neighbors = 20
 
         super(DimeNetPlusPlusWrap, self).__init__(
             hidden_channels=hidden_channels,
@@ -488,6 +490,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             cell_offset_distances = torch.zeros_like(
                 cell_offsets, device=data.pos.device
             )
+
             neighbors = compute_neighbors(data, edge_index)
 
         return (
