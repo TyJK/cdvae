@@ -5,7 +5,7 @@ import torch
 import copy
 import itertools
 
-from pymatgen.core.structure import Structure
+from pymatgen.core.structure import Molecule, Structure
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.graphs import StructureGraph
 from pymatgen.analysis import local_env
@@ -105,44 +105,6 @@ def build_crystal(crystal_str, niggli=True, primitive=False):
     return canonical_crystal
 
 
-def build_crystal_graph(crystal, graph_method='crystalnn'):
-    """
-    """
-
-    if graph_method == 'crystalnn':
-        crystal_graph = StructureGraph.with_local_env_strategy(
-            crystal, CrystalNN)
-    elif graph_method == 'none':
-        pass
-    else:
-        raise NotImplementedError
-
-    coords = crystal.coords
-    atom_types = crystal.atomic_numbers
-    lattice_parameters = crystal.lattice.parameters
-    lengths = lattice_parameters[:3]
-    angles = lattice_parameters[3:]
-
-    assert np.allclose(crystal.lattice.matrix,
-                       lattice_params_to_matrix(*lengths, *angles))
-
-    edge_indices, to_jimages = [], []
-    if graph_method != 'none':
-        for i, j, to_jimage in crystal_graph.graph.edges(data='to_jimage'):
-            edge_indices.append([j, i])
-            to_jimages.append(to_jimage)
-            edge_indices.append([i, j])
-            to_jimages.append(tuple(-tj for tj in to_jimage))
-
-    atom_types = np.array(atom_types)
-    lengths, angles = np.array(lengths), np.array(angles)
-    edge_indices = np.array(edge_indices)
-    to_jimages = np.array(to_jimages)
-    num_atoms = atom_types.shape[0]
-
-    return coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms
-
-
 def abs_cap(val, max_abs_val=1):
     """
     Returns the value with its absolute value capped at max_abs_val.
@@ -203,14 +165,10 @@ def compute_neighbors(data, edge_index):
     # Get number of neighbors
     # segment_coo assumes sorted index
     ones = edge_index[1].new_ones(1).expand_as(edge_index[1])
-    num_neighbors = segment_coo(
-        ones, edge_index[1], dim_size=data.natoms.sum()
-    )
+    num_neighbors = segment_coo(ones, edge_index[1], dim_size=data.natoms.sum())
 
     # Get number of neighbors per image
-    image_indptr = torch.zeros(
-        data.natoms.shape[0] + 1, device=data.pos.device, dtype=torch.long
-    )
+    image_indptr = torch.zeros(data.num_atoms.shape[0] + 1, device=data.pos.device, dtype=torch.long)
     image_indptr[1:] = torch.cumsum(data.natoms, dim=0)
     neighbors = segment_csr(num_neighbors, image_indptr)
 
@@ -304,8 +262,7 @@ class StandardScalerTorch(object):
         self.means = means
         self.stds = stds
 
-    def fit(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+    def fit(self, X: torch.tensor):
         self.means = torch.mean(X, dim=0)
         # https://github.com/pytorch/pytorch/issues/29372
         self.stds = torch.std(X, dim=0, unbiased=False) + EPSILON
@@ -337,50 +294,11 @@ class StandardScalerTorch(object):
 
 
 def get_scaler_from_data_list(data_list, key):
-    targets = torch.tensor([d[key] for d in data_list])
+    targets = torch.from_numpy(data_list[key].values)
     scaler = StandardScalerTorch()
     scaler.fit(targets)
+
     return scaler
-
-
-def preprocess(input_file, num_workers, primitive, graph_method, prop_list):
-    df = pd.read_csv(input_file)
-
-    def process_one(row, niggli, primitive, graph_method, prop_list):
-        crystal_str = row['cif']
-        crystal = build_crystal(
-            crystal_str, niggli=niggli, primitive=primitive)
-        graph_arrays = build_crystal_graph(crystal, graph_method)
-        properties = {k: row[k] for k in prop_list if k in row.keys()}
-
-        # import pdb; pdb.set_trace()
-        result_dict = {
-            'mp_id': row['material_id'],
-            'cif': crystal_str,
-            'graph_arrays': graph_arrays,
-        }
-        result_dict.update(properties)
-        return result_dict
-
-    # TODO (jwhite) remove
-    ex = df.iloc[0]
-    # import pdb; pdb.set_trace()
-    ex = process_one(ex, True, False, "crystalnn", [])
-
-    unordered_results = p_umap(
-        process_one,
-        [df.iloc[idx] for idx in range(len(df))],
-        [True] * len(df),
-        [False] * len(df),
-        [graph_method] * len(df),
-        [prop_list] * len(df),
-        num_cpus=num_workers)
-
-    mpid_to_results = {result['mp_id']: result for result in unordered_results}
-    ordered_results = [mpid_to_results[df.iloc[idx]['material_id']]
-                       for idx in range(len(df))]
-
-    return ordered_results
 
 
 def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
@@ -395,7 +313,7 @@ def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
             species=atom_types,
             coords=coords,
             coords_are_cartesian=False)
-        graph_arrays = build_crystal_graph(crystal, graph_method)
+        graph_arrays = build_molecular_graph(crystal, graph_method)
         result_dict = {
             'batch_idx': batch_idx,
             'graph_arrays': graph_arrays,
