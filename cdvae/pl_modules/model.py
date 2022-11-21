@@ -171,6 +171,7 @@ class CDVAE(BaseModule):
         mu = self.fc_mu(hidden)
         log_var = self.fc_var(hidden)
         z = self.reparameterize(mu, log_var)
+
         return mu, log_var, z
 
     def decode_stats(self, z, gt_num_atoms=None):
@@ -266,7 +267,13 @@ class CDVAE(BaseModule):
         return samples
 
     def forward(self, batch, teacher_forcing, training):
-        # hacky way to resolve the NaN issue. Will need more careful debugging later.
+        # solves an issue of missing batch indices of unknown cause
+        if not batch.batch:
+            batch.batch = torch.repeat_interleave(
+                torch.arange(len(batch.num_atoms)),
+                repeats=batch.num_atoms
+            )
+
         mu, log_var, z = self.encode(batch)
 
         pred_num_atoms, pred_composition_per_atom = self.decode_stats(z, batch.num_atoms)
@@ -299,7 +306,6 @@ class CDVAE(BaseModule):
         coords = batch.coords  # TODO simplify/remove
         noisy_coords = coords + noises_per_atom
 
-        import pdb; pdb.set_trace()
         pred_lengths, pred_angles = None, None
         pred_coord_diff, pred_atom_types = self.decoder(z, noisy_coords, rand_atom_types, batch.num_atoms)
 
