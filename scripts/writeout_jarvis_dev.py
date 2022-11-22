@@ -5,14 +5,14 @@ import pandas as pd
 
 def main():
     print("reading csv...")
-    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/train.csv", index_col="dataset_id", nrows=1024)
+    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/train.csv", index_col="dataset_id", nrows=1000)
     df.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/train.csv")
 
 
-    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/val.csv", index_col="dataset_id", nrows=512)
+    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/val.csv", index_col="dataset_id", nrows=500)
     df.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/val.csv")
 
-    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/test.csv", index_col="dataset_id", nrows=256)
+    df = pd.read_csv("~/Projects/mila/cdvae/data/jarvis/test.csv", index_col="dataset_id", nrows=250)
     df.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/test.csv")
 
 

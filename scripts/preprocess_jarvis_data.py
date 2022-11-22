@@ -6,7 +6,7 @@ from cdvae.common.constants import ATOMIC_SYMBOL_TO_NUMBER_MAP
 
 def main():
     print("reading csv...")
-    jarvis = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/jarvis-oct-18.csv", low_memory=False, nrows=1000)
+    jarvis = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/jarvis-oct-18.csv", low_memory=False)
     jarvis = jarvis.groupby("dataset_id").first()  # removes duplicates
 
     jarvis = jarvis[jarvis["dataset_name"]!="QM9"]
@@ -31,9 +31,9 @@ def main():
     test = jarvis.loc[test_idx]
 
     print("writing to disk...")
-    train.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/train.csv")
-    val.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/val.csv")
-    test.to_csv("~/Projects/mila/cdvae/data/jarvis_dev/test.csv")
+    train.to_csv("~/Projects/mila/cdvae/data/jarvis/train.csv")
+    val.to_csv("~/Projects/mila/cdvae/data/jarvis/val.csv")
+    test.to_csv("~/Projects/mila/cdvae/data/jarvis/test.csv")
 
 
 if __name__ == "__main__":
