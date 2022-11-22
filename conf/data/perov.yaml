@@ -1,16 +1,15 @@
-root_path: ${oc.env:PROJECT_ROOT}/data/perov_5
+root_path: ${oc.env:PROJECT_ROOT}/data/perov_j
 prop: heat_ref
 num_targets: 1
 # prop: scaled_lattice
 # num_targets: 6
-niggli: true
+otf_graph: True
 primitive: false
-graph_method: crystalnn
+graph_method: none
 lattice_scale_method: scale_length
 preprocess_workers: 30
 readout: mean
 max_atoms: 20
-otf_graph: false
 eval_model_name: perovskite
 
 
@@ -28,10 +27,8 @@ datamodule:
       name: Formation energy train
       path: ${data.root_path}/train.csv
       prop: ${data.prop}
-      niggli: ${data.niggli}
       primitive: ${data.primitive}
       graph_method: ${data.graph_method}
-      lattice_scale_method: ${data.lattice_scale_method}
       preprocess_workers: ${data.preprocess_workers}
 
     val:
@@ -39,10 +36,8 @@ datamodule:
         name: Formation energy val
         path: ${data.root_path}/val.csv
         prop: ${data.prop}
-        niggli: ${data.niggli}
         primitive: ${data.primitive}
         graph_method: ${data.graph_method}
-        lattice_scale_method: ${data.lattice_scale_method}
         preprocess_workers: ${data.preprocess_workers}
 
     test:
@@ -50,10 +45,8 @@ datamodule:
         name: Formation energy test
         path: ${data.root_path}/test.csv
         prop: ${data.prop}
-        niggli: ${data.niggli}
         primitive: ${data.primitive}
         graph_method: ${data.graph_method}
-        lattice_scale_method: ${data.lattice_scale_method}
         preprocess_workers: ${data.preprocess_workers}
 
   scaler_path: ${data.root_path}

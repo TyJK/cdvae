@@ -168,11 +168,8 @@ class CDVAE(BaseModule):
         encode crystal structures to latents.
         """
         hidden = self.encoder(batch)
-        import pdb; pdb.set_trace()
         mu = self.fc_mu(hidden)
         log_var = self.fc_var(hidden)
-        print(log_var[:10,0])
-        # import pdb; pdb.set_trace()  # problem: log_var blows up the variance calc
         z = self.reparameterize(mu, log_var)
 
         return mu, log_var, z
@@ -273,7 +270,7 @@ class CDVAE(BaseModule):
         # solves an issue of missing batch indices of unknown cause
         if not batch.batch:
             batch.batch = torch.repeat_interleave(
-                torch.arange(len(batch.num_atoms)),
+                torch.arange(len(batch.num_atoms), device=batch.num_atoms.device),
                 repeats=batch.num_atoms
             )
 
@@ -449,8 +446,7 @@ class CDVAE(BaseModule):
             self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
         outputs = self(batch, teacher_forcing, training=True)
         log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
-        print(log_dict)
-        import pdb; pdb.set_trace()
+
         self.log_dict(
             log_dict,
             on_step=True,
