@@ -475,12 +475,18 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             if otf_graph:
                 # note: implementation via customized radius_graph_pbc was preferable to radius_graph
                 # the latter seems not to properly leverage max_neighbors
-                edge_index, num_neighbors_image = radius_graph_pbc(
-                    data,
-                    radius=cutoff,
-                    pbc=[False, False, False],
-                    max_num_neighbors_threshold=max_neighbors,
+                edge_index = radius_graph(
+                    data.pos,
+                    r=cutoff,
+                    batch=data.batch,
+                    max_num_neighbors=max_neighbors
                 )
+                # edge_index, _ = radius_graph_pbc(
+                #     data,
+                #     radius=cutoff,
+                #     pbc=[False, False, False],
+                #     max_num_neighbors_threshold=max_neighbors,
+                # )
 
             j, i = edge_index
             distance_vec = data.pos[j] - data.pos[i]
