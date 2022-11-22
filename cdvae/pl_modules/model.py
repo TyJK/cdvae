@@ -312,7 +312,6 @@ class CDVAE(BaseModule):
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
         composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch)
-        import pdb; pdb.set_trace()
         coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch)
 
@@ -417,8 +416,9 @@ class CDVAE(BaseModule):
 
     def coord_loss(self, pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch):
         target_coords = batch.coords
-        target_cart_coord_diff = torch.sum((target_coords-noisy_coords)**2, dim=1)
+        target_cart_coord_diff = target_coords-noisy_coords
 
+        # noise-adjusted MSE
         target_cart_coord_diff = target_cart_coord_diff / used_sigmas_per_atom[:, None]**2
         pred_coord_diff = pred_coord_diff / used_sigmas_per_atom[:, None]
 
