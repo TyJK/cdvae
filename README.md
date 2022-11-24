@@ -10,7 +10,7 @@ It has several main functionalities:
 [[Paper]](https://arxiv.org/abs/2110.06197) [[Datasets]](data/)
 
 <p align="center">
-  <img src="assets/illustrative.png" /> 
+  <img src="assets/illustrative.png" />
 </p>
 
 <p align="center">

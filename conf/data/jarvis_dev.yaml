@@ -5,7 +5,7 @@ otf_graph: True  # can't use CrystalNN on non-crystalline datasets
 graph_method: none  # no pre-graph calc in preprocessing
 num_targets: 1
 preprocess_workers: 16
-max_atoms: 128
+max_atoms: 25
 eval_model_name: jarvis
 
 train_max_epochs: 3000

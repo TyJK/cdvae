@@ -9,7 +9,7 @@ def main():
     jarvis = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/jarvis-oct-18.csv", low_memory=False)
     jarvis = jarvis.groupby("dataset_id").first()  # removes duplicates
 
-    jarvis = jarvis[jarvis["dataset_name"]!="QM9"]
+    jarvis = jarvis[jarvis["dataset_name"]=="DFT3D"]
 
     # print("processing cols...")
     jarvis["elements"] = jarvis["elements"].apply(
@@ -17,6 +17,8 @@ def main():
     ))))
 
     jarvis["num_atoms"] = jarvis["elements"].apply(len)
+
+    jarvis = jarvis[jarvis["num_atoms"] <= 50]
 
     jarvis = jarvis.round(8)  # smooths out compute tails
 
