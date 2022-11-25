@@ -13,8 +13,9 @@ import torch.nn as nn
 from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
-from cdvae.common.data_utils import (
-    get_pbc_distances, radius_graph_pbc, frac_to_cart_coords)
+from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
+
+from .base.base import BaseModel
 
 from .layers.atom_update_block import OutputBlock
 from .layers.base_layers import Dense
@@ -34,12 +35,14 @@ from .utils import (
 )
 
 
-class GemNetT(torch.nn.Module):
+class GemNetT(BaseModel):
     """
     GemNet-T, triplets-only variant of GemNet
 
     Parameters
     ----------
+        num_atoms (int): Unused argument
+        bond_feat_dim (int): Unused argument
         num_targets: int
             Number of prediction targets.
 
@@ -86,8 +89,8 @@ class GemNetT(torch.nn.Module):
             Name and hyperparameters of the envelope function.
         cbf: dict
             Name and hyperparameters of the cosine basis function.
-        aggregate: bool
-            Whether to aggregated node outputs
+        extensive: bool
+            Whether the output should be extensive (proportional to the number of atoms)
         output_init: str
             Initialization method for the final dense layer.
         activation: str
@@ -114,31 +117,40 @@ class GemNetT(torch.nn.Module):
         num_concat: int = 1,
         num_atom: int = 3,
         regress_forces: bool = True,
+        direct_forces: bool = True,
         cutoff: float = 6.0,
         max_neighbors: int = 50,
         rbf: dict = {"name": "gaussian"},
         envelope: dict = {"name": "polynomial", "exponent": 5},
         cbf: dict = {"name": "spherical_harmonics"},
-        otf_graph: bool = False,
+        extensive: bool = False,
+        otf_graph: bool = True,
+        use_pbc: bool = False,
         output_init: str = "HeOrthogonal",
         activation: str = "swish",
+        num_elements: int = 83,
         scale_file: Optional[str] = None,
     ):
         super().__init__()
         self.num_targets = num_targets
         assert num_blocks > 0
         self.num_blocks = num_blocks
+        self.extensive = extensive
 
         self.cutoff = cutoff
-        # assert self.cutoff <= 6 or otf_graph
+        assert self.cutoff <= 6 or otf_graph
 
         self.max_neighbors = max_neighbors
-        # assert self.max_neighbors == 50 or otf_graph
+        assert self.max_neighbors == 50 or otf_graph  # this is 20 in default config
 
         self.regress_forces = regress_forces
         self.otf_graph = otf_graph
+        self.use_pbc = use_pbc
 
         AutomaticFit.reset()  # make sure that queue is empty (avoid potential error)
+
+        # GemNet variants
+        self.direct_forces = direct_forces
 
         ### ---------------------------------- Basis Functions ---------------------------------- ###
         self.radial_basis = RadialBasis(
@@ -190,7 +202,7 @@ class GemNetT(torch.nn.Module):
         ### ------------------------------------------------------------------------------------- ###
 
         # Embedding block
-        self.atom_emb = AtomEmbedding(emb_size_atom)
+        self.atom_emb = AtomEmbedding(emb_size_atom, MAX_ATOMIC_NUM)
         self.atom_latent_emb = nn.Linear(emb_size_atom + latent_dim, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
@@ -230,7 +242,7 @@ class GemNetT(torch.nn.Module):
                     num_targets=num_targets,
                     activation=activation,
                     output_init=output_init,
-                    direct_forces=True,
+                    direct_forces=direct_forces,
                     scale_file=scale_file,
                     name=f"OutBlock_{i}",
                 )
@@ -240,10 +252,10 @@ class GemNetT(torch.nn.Module):
         self.int_blocks = torch.nn.ModuleList(int_blocks)
 
         self.shared_parameters = [
-            (self.mlp_rbf3, self.num_blocks),
-            (self.mlp_cbf3, self.num_blocks),
-            (self.mlp_rbf_h, self.num_blocks),
-            (self.mlp_rbf_out, self.num_blocks + 1),
+            (self.mlp_rbf3.linear.weight, self.num_blocks),
+            (self.mlp_cbf3.weight, self.num_blocks),
+            (self.mlp_rbf_h.linear.weight, self.num_blocks),
+            (self.mlp_rbf_out.linear.weight, self.num_blocks + 1),
         ]
 
     def get_triplets(self, edge_index, num_atoms):
@@ -384,6 +396,7 @@ class GemNetT(torch.nn.Module):
 
     def select_edges(
         self,
+        data,
         edge_index,
         cell_offsets,
         neighbors,
@@ -402,86 +415,69 @@ class GemNetT(torch.nn.Module):
 
         empty_image = neighbors == 0
         if torch.any(empty_image):
-            import pdb
-            pdb.set_trace()
-            # raise ValueError(
-            #     f"An image has no neighbors: id={data.id[empty_image]}, "
-            #     f"sid={data.sid[empty_image]}, fid={data.fid[empty_image]}"
-            # )
+            raise ValueError(
+                f"An image has no neighbors: id={data.id[empty_image]}, "
+                f"sid={data.sid[empty_image]}, fid={data.fid[empty_image]}"
+            )
         return edge_index, cell_offsets, neighbors, edge_dist, edge_vector
 
-    def generate_interaction_graph(self, cart_coords, lengths, angles,
-                                   num_atoms, edge_index, to_jimages,
-                                   num_bonds):
+    def generate_interaction_graph(self, data):
+        num_atoms = data.atomic_numbers.size(0)
 
-        if self.otf_graph:
-            edge_index, to_jimages, num_bonds = radius_graph_pbc(
-                cart_coords, lengths, angles, num_atoms, self.cutoff, self.max_neighbors,
-                device=num_atoms.device)
-
-        # Switch the indices, so the second one becomes the target index,
-        # over which we can efficiently aggregate.
-        out = get_pbc_distances(
-            cart_coords,
+        (
             edge_index,
-            lengths,
-            angles,
-            to_jimages,
-            num_atoms,
-            num_bonds,
-            coord_is_cart=True,
-            return_offsets=True,
-            return_distance_vec=True,
-        )
-
-        edge_index = out["edge_index"]
-        D_st = out["distances"]
+            D_st,
+            distance_vec,
+            cell_offsets,
+            _,  # cell offset distances
+            neighbors,
+        ) = self.generate_graph(data)
         # These vectors actually point in the opposite direction.
         # But we want to use col as idx_t for efficient aggregation.
-        V_st = -out["distance_vec"] / D_st[:, None]
-        # offsets_ca = -out["offsets"]  # a - c + offset
+        V_st = -distance_vec / D_st[:, None]
 
-        # # Mask interaction edges if required
-        # if self.otf_graph or np.isclose(self.cutoff, 6):
-        #     select_cutoff = None
-        # else:
-        #     select_cutoff = self.cutoff
-
-
-        ## Tian: Ignore these select edges for now
-
+        # Mask interaction edges if required
+        if self.otf_graph or np.isclose(self.cutoff, 6):
+            select_cutoff = None
+        else:
+            select_cutoff = self.cutoff
+        # we ignore it because Xie ignores it
         # (edge_index, cell_offsets, neighbors, D_st, V_st,) = self.select_edges(
+        #     data=data,
         #     edge_index=edge_index,
-        #     cell_offsets=to_jimages,
-        #     neighbors=num_bonds,
+        #     cell_offsets=cell_offsets,
+        #     neighbors=neighbors,
         #     edge_dist=D_st,
         #     edge_vector=V_st,
         #     cutoff=select_cutoff,
         # )
 
-        (
-            edge_index,
-            cell_offsets,
-            neighbors,
-            D_st,
-            V_st,
-        ) = self.reorder_symmetric_edges(
-            edge_index, to_jimages, num_bonds, D_st, V_st
-        )
+        # TODO (jwhite) revisit
+        # (
+        #     edge_index,
+        #     cell_offsets,
+        #     neighbors,
+        #     D_st,
+        #     V_st,
+        # ) = self.reorder_symmetric_edges(
+        #     edge_index, cell_offsets, neighbors, D_st, V_st
+        # )
 
         # Indices for swapping c->a and a->c (for symmetric MP)
-        block_sizes = neighbors // 2
-        id_swap = repeat_blocks(
-            block_sizes,
-            repeats=2,
-            continuous_indexing=False,
-            start_idx=block_sizes[0],
-            block_inc=block_sizes[:-1] + block_sizes[1:],
-            repeat_inc=-block_sizes,
-        )
+        # TODO (jwhite) revisit
+        id_swap = torch.arange(edge_index.shape[1])
+        # block_sizes = neighbors // 2
+        # id_swap = repeat_blocks(
+        #     block_sizes,
+        #     repeats=2,
+        #     continuous_indexing=False,
+        #     start_idx=block_sizes[0],
+        #     block_inc=block_sizes[:-1] + block_sizes[1:],
+        #     repeat_inc=-block_sizes,
+        # )
 
         id3_ba, id3_ca, id3_ragged_idx = self.get_triplets(
-            edge_index, num_atoms=num_atoms.sum(),
+            edge_index, num_atoms=num_atoms
         )
 
         return (
@@ -495,25 +491,13 @@ class GemNetT(torch.nn.Module):
             id3_ragged_idx,
         )
 
-    def forward(self, z, frac_coords, atom_types, num_atoms, lengths, angles,
-                edge_index, to_jimages, num_bonds):
-        """
-        args:
-            z: (N_cryst, num_latent)
-            frac_coords: (N_atoms, 3)
-            atom_types: (N_atoms, ), need to use atomic number e.g. H = 1
-            num_atoms: (N_cryst,)
-            lengths: (N_cryst, 3)
-            angles: (N_cryst, 3)
-        returns:
-            atom_frac_coords: (N_atoms, 3)
-            atom_types: (N_atoms, MAX_ATOMIC_NUM)
-        """
-        pos = frac_to_cart_coords(frac_coords, lengths, angles, num_atoms)
-        batch = torch.arange(num_atoms.size(0),
-                             device=num_atoms.device).repeat_interleave(
-                                 num_atoms, dim=0)
-        atomic_numbers = atom_types
+    def forward(self, z, data):
+        pos = data.pos
+        batch = data.batch
+        atomic_numbers = data.atomic_numbers.long()
+
+        if self.regress_forces and not self.direct_forces:
+            pos.requires_grad_(True)
 
         (
             edge_index,
@@ -524,9 +508,7 @@ class GemNetT(torch.nn.Module):
             id3_ba,
             id3_ca,
             id3_ragged_idx,
-        ) = self.generate_interaction_graph(
-            pos, lengths, angles, num_atoms, edge_index, to_jimages,
-            num_bonds)
+        ) = self.generate_interaction_graph(data)
         idx_s, idx_t = edge_index
 
         # Calculate triplet angles
@@ -536,14 +518,15 @@ class GemNetT(torch.nn.Module):
         rbf = self.radial_basis(D_st)
 
         # Embedding block
-        h = self.atom_emb(atomic_numbers)
+        hidden = self.atom_emb(atomic_numbers)
         # Merge z and atom embedding
         if z is not None:
-            z_per_atom = z.repeat_interleave(num_atoms, dim=0)
-            h = torch.cat([h, z_per_atom], dim=1)
-            h = self.atom_latent_emb(h)
+            z_per_atom = z.repeat_interleave(data.num_atoms, dim=0)
+            hidden = torch.cat([hidden, z_per_atom], dim=1)
+            hidden = self.atom_latent_emb(hidden)
+
         # (nAtoms, emb_size_atom)
-        m = self.edge_emb(h, rbf, idx_s, idx_t)  # (nEdges, emb_size_edge)
+        m = self.edge_emb(hidden, rbf, idx_s, idx_t)  # (nEdges, emb_size_edge)
 
         rbf3 = self.mlp_rbf3(rbf)
         cbf3 = self.mlp_cbf3(rad_cbf3, cbf3, id3_ca, id3_ragged_idx)
@@ -551,13 +534,13 @@ class GemNetT(torch.nn.Module):
         rbf_h = self.mlp_rbf_h(rbf)
         rbf_out = self.mlp_rbf_out(rbf)
 
-        E_t, F_st = self.out_blocks[0](h, m, rbf_out, idx_t)
+        E_t, F_st = self.out_blocks[0](hidden, m, rbf_out, idx_t)
         # (nAtoms, num_targets), (nEdges, num_targets)
 
         for i in range(self.num_blocks):
             # Interaction block
-            h, m = self.int_blocks[i](
-                h=h,
+            hidden, m = self.int_blocks[i](
+                h=hidden,
                 m=m,
                 rbf3=rbf3,
                 cbf3=cbf3,
@@ -570,35 +553,55 @@ class GemNetT(torch.nn.Module):
                 idx_t=idx_t,
             )  # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
 
-            E, F = self.out_blocks[i + 1](h, m, rbf_out, idx_t)
+            E, F = self.out_blocks[i + 1](hidden, m, rbf_out, idx_t)
             # (nAtoms, num_targets), (nEdges, num_targets)
             F_st += F
             E_t += E
 
         nMolecules = torch.max(batch) + 1
-
-        # always use mean aggregation
-        E_t = scatter(
-            E_t, batch, dim=0, dim_size=nMolecules, reduce="mean"
-        )  # (nMolecules, num_targets)
+        if self.extensive:
+            E_t = scatter(
+                E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
+            )  # (nMolecules, num_targets)
+        else:
+            E_t = scatter(
+                E_t, batch, dim=0, dim_size=nMolecules, reduce="mean"
+            )  # (nMolecules, num_targets)
 
         if self.regress_forces:
-            # if predict forces, there should be only 1 energy
-            assert E_t.size(1) == 1
-            # map forces in edge directions
-            F_st_vec = F_st[:, :, None] * V_st[:, None, :]
-            # (nEdges, num_targets, 3)
-            F_t = scatter(
-                F_st_vec,
-                idx_t,
-                dim=0,
-                dim_size=num_atoms.sum(),
-                reduce="add",
-            )  # (nAtoms, num_targets, 3)
-            F_t = F_t.squeeze(1)  # (nAtoms, 3)
+            if self.direct_forces:
+                # map forces in edge directions
+                F_st_vec = F_st[:, :, None] * V_st[:, None, :]
+                # (nEdges, num_targets, 3)
+                F_t = scatter(
+                    F_st_vec,
+                    idx_t,
+                    dim=0,
+                    dim_size=data.atomic_numbers.size(0),
+                    reduce="add",
+                )  # (nAtoms, num_targets, 3)
+                F_t = F_t.squeeze(1)  # (nAtoms, 3)
+            else:
+                if self.num_targets > 1:
+                    forces = []
+                    for i in range(self.num_targets):
+                        # maybe this can be solved differently
+                        forces += [
+                            -torch.autograd.grad(
+                                E_t[:, i].sum(), pos, create_graph=True
+                            )[0]
+                        ]
+                    F_t = torch.stack(forces, dim=1)
+                    # (nAtoms, num_targets, 3)
+                else:
+                    F_t = -torch.autograd.grad(
+                        E_t.sum(), pos, create_graph=True
+                    )[0]
+                    # (nAtoms, 3)
 
             # return h for predicting atom types
-            return h, F_t  # (nMolecules, num_targets), (nAtoms, 3)
+            return hidden, F_t  # (nMolecules, num_targets), (nAtoms, 3)
+
         else:
             return E_t
 

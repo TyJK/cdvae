@@ -1,9 +1,14 @@
-"""This module is adapted from https://github.com/Open-Catalyst-Project/ocp/tree/master/ocpmodels/models
-"""
+"""This module is adapted from https://github.com/Open-Catalyst-Project/ocp/tree/master/ocpmodels/models"""
+try:
+    import sympy as sym
+except ImportError:
+    sym = None
 
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
+
+from torch_geometric.nn import radius_graph
 from torch_geometric.nn.acts import swish
 from torch_geometric.nn.inits import glorot_orthogonal
 from torch_geometric.nn.models.dimenet import (
@@ -14,17 +19,9 @@ from torch_geometric.nn.models.dimenet import (
 )
 from torch_sparse import SparseTensor
 
-from cdvae.common.data_utils import (
-    get_pbc_distances,
-    frac_to_cart_coords,
-    radius_graph_pbc_wrapper,
-)
 from cdvae.pl_modules.gemnet.gemnet import GemNetT
 
-try:
-    import sympy as sym
-except ImportError:
-    sym = None
+from cdvae.common.data_utils import compute_neighbors, radius_graph_pbc
 
 
 class InteractionPPBlock(torch.nn.Module):
@@ -169,6 +166,7 @@ class OutputPPBlock(torch.nn.Module):
 
 class DimeNetPlusPlus(torch.nn.Module):
     r"""DimeNet++ implementation based on https://github.com/klicperajo/dimenet.
+
     Args:
         hidden_channels (int): Hidden embedding size.
         out_channels (int): Size of each output sample.
@@ -211,6 +209,7 @@ class DimeNetPlusPlus(torch.nn.Module):
         num_output_layers=3,
         act=swish,
     ):
+
         super(DimeNetPlusPlus, self).__init__()
 
         self.cutoff = cutoff
@@ -267,10 +266,8 @@ class DimeNetPlusPlus(torch.nn.Module):
         for interaction in self.interaction_blocks:
             interaction.reset_parameters()
 
-    def triplets(self, edge_index, num_nodes):
+    def triplets(self, edge_index, cell_offsets, num_nodes):
         row, col = edge_index  # j->i
-
-        # row, col = col, row  # Swap because my definition of edge_index is i->j
 
         value = torch.arange(row.size(0), device=row.device)
         adj_t = SparseTensor(
@@ -283,17 +280,23 @@ class DimeNetPlusPlus(torch.nn.Module):
         idx_i = col.repeat_interleave(num_triplets)
         idx_j = row.repeat_interleave(num_triplets)
         idx_k = adj_t_row.storage.col()
-        mask = idx_i != idx_k  # Remove i == k triplets.
-        idx_i, idx_j, idx_k = idx_i[mask], idx_j[mask], idx_k[mask]
 
-        # Edge indices (k-j, j->i) for triplets.
-        idx_kj = adj_t_row.storage.value()[mask]
-        idx_ji = adj_t_row.storage.row()[mask]
+        # Edge indices (k->j, j->i) for triplets.
+        idx_kj = adj_t_row.storage.value()
+        idx_ji = adj_t_row.storage.row()
+
+        # Remove self-loop triplets d->b->d
+        # Check atom as well as cell offset
+        cell_offset_kji = cell_offsets[idx_kj] + cell_offsets[idx_ji]
+        mask = (idx_i != idx_k) | torch.any(cell_offset_kji != 0, dim=-1)
+
+        idx_i, idx_j, idx_k = idx_i[mask], idx_j[mask], idx_k[mask]
+        idx_kj, idx_ji = idx_kj[mask], idx_ji[mask]
 
         return col, row, idx_i, idx_j, idx_k, idx_kj, idx_ji
 
     def forward(self, z, pos, batch=None):
-        """"""
+        """ """
         raise NotImplementedError
 
 
@@ -301,6 +304,8 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
     def __init__(
         self,
         num_targets,
+        use_pbc=True,
+        regress_forces=False,
         hidden_channels=128,
         num_blocks=4,
         int_emb_size=64,
@@ -310,19 +315,17 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         num_radial=6,
         otf_graph=False,
         cutoff=10.0,
-        max_num_neighbors=20,
         envelope_exponent=5,
         num_before_skip=1,
         num_after_skip=2,
         num_output_layers=3,
-        readout='mean',
     ):
         self.num_targets = num_targets
+        self.regress_forces = regress_forces
+        self.use_pbc = use_pbc
         self.cutoff = cutoff
-        self.max_num_neighbors = max_num_neighbors
         self.otf_graph = otf_graph
-
-        self.readout = readout
+        self.max_neighbors = 20
 
         super(DimeNetPlusPlusWrap, self).__init__(
             hidden_channels=hidden_channels,
@@ -340,51 +343,46 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             num_output_layers=num_output_layers,
         )
 
-    def forward(self, data):
+    def _forward(self, data):
+        data.pos = data.coords
+        data.natoms = data.num_atoms
+        pos = data.pos
         batch = data.batch
 
-        if self.otf_graph:
-            edge_index, cell_offsets, neighbors = radius_graph_pbc_wrapper(
-                data, self.cutoff, self.max_num_neighbors, data.num_atoms.device
-            )
-            data.edge_index = edge_index
-            data.to_jimages = cell_offsets
-            data.num_bonds = neighbors
+        (
+            edge_index,
+            dist,
+            _,
+            cell_offsets,
+            offsets,
+            neighbors,
+        ) = self.generate_graph(data)
 
-        pos = frac_to_cart_coords(
-            data.frac_coords,
-            data.lengths,
-            data.angles,
-            data.num_atoms)
-
-        out = get_pbc_distances(
-            data.frac_coords,
-            data.edge_index,
-            data.lengths,
-            data.angles,
-            data.to_jimages,
-            data.num_atoms,
-            data.num_bonds,
-            return_offsets=True
-        )
-
-        edge_index = out["edge_index"]
-        dist = out["distances"]
-        offsets = out["offsets"]
-
+        data.edge_index = edge_index
+        data.cell_offsets = cell_offsets
+        data.neighbors = neighbors
         j, i = edge_index
 
+        data.atomic_numbers = data.atom_types
         _, _, idx_i, idx_j, idx_k, idx_kj, idx_ji = self.triplets(
-            edge_index, num_nodes=data.atom_types.size(0)
+            edge_index,
+            data.cell_offsets,
+            num_nodes=data.atomic_numbers.size(0),
         )
 
         # Calculate angles.
         pos_i = pos[idx_i].detach()
         pos_j = pos[idx_j].detach()
-        pos_ji, pos_kj = (
-            pos[idx_j].detach() - pos_i + offsets[idx_ji],
-            pos[idx_k].detach() - pos_j + offsets[idx_kj],
-        )
+        if self.use_pbc:
+            pos_ji, pos_kj = (
+                pos[idx_j].detach() - pos_i + offsets[idx_ji],
+                pos[idx_k].detach() - pos_j + offsets[idx_kj],
+            )
+        else:
+            pos_ji, pos_kj = (
+                pos[idx_j].detach() - pos_i,
+                pos[idx_k].detach() - pos_j,
+            )
 
         a = (pos_ji * pos_kj).sum(dim=-1)
         b = torch.cross(pos_ji, pos_kj).norm(dim=-1)
@@ -394,7 +392,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         sbf = self.sbf(dist, angle, idx_kj)
 
         # Embedding block.
-        x = self.emb(data.atom_types.long(), rbf, i, j)
+        x = self.emb(data.atomic_numbers.long(), rbf, i, j)
         P = self.output_blocks[0](x, rbf, i, num_nodes=pos.size(0))
 
         # Interaction blocks.
@@ -404,23 +402,113 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             x = interaction_block(x, rbf, sbf, idx_kj, idx_ji)
             P += output_block(x, rbf, i, num_nodes=pos.size(0))
 
-        # Use mean
-        if batch is None:
-            if self.readout == 'mean':
-                energy = P.mean(dim=0)
-            elif self.readout == 'sum':
-                energy = P.sum(dim=0)
-            elif self.readout == 'cat':
-                import pdb
-                pdb.set_trace()
-                energy = torch.cat([P.sum(dim=0), P.mean(dim=0)])
-            else:
-                raise NotImplementedError
-        else:
-            # TODO: if want to use cat, need two lines here
-            energy = scatter(P, batch, dim=0, reduce=self.readout)
+        energy = P.sum(dim=0) if batch is None else scatter(P, batch, dim=0)
 
         return energy
+
+    def forward(self, data):
+        if self.regress_forces:
+            data.pos.requires_grad_(True)
+        energy = self._forward(data)
+
+        if self.regress_forces:
+            forces = -1 * (
+                torch.autograd.grad(
+                    energy,
+                    data.pos,
+                    grad_outputs=torch.ones_like(energy),
+                    create_graph=True,
+                )[0]
+            )
+            return energy, forces
+        else:
+            return energy
+
+    def generate_graph(
+        self,
+        data,
+        cutoff=None,
+        max_neighbors=None,
+        use_pbc=None,
+        otf_graph=None,
+    ):
+        cutoff = cutoff or self.cutoff
+        max_neighbors = max_neighbors or self.max_neighbors
+        use_pbc = use_pbc or self.use_pbc
+        otf_graph = otf_graph or self.otf_graph
+
+        if not otf_graph:
+            try:
+                edge_index = data.edge_index
+
+                if use_pbc:
+                    cell_offsets = data.cell_offsets
+                    neighbors = data.neighbors
+
+            except AttributeError:
+                logging.warning(
+                    "Turning otf_graph=True as required attributes not present in data object"
+                )
+                otf_graph = True
+
+        if use_pbc:
+            if otf_graph:
+                edge_index, cell_offsets, neighbors = radius_graph_pbc(
+                    data, cutoff, max_neighbors
+                )
+
+            out = get_pbc_distances(
+                data.pos,
+                edge_index,
+                data.cell,
+                cell_offsets,
+                neighbors,
+                return_offsets=True,
+                return_distance_vec=True,
+            )
+
+            edge_index = out["edge_index"]
+            edge_dist = out["distances"]
+            cell_offset_distances = out["offsets"]
+            distance_vec = out["distance_vec"]
+        else:
+            if otf_graph:
+                # note: implementation via customized radius_graph_pbc was preferable to radius_graph
+                # the latter seems not to properly leverage max_neighbors
+                edge_index = radius_graph(
+                    data.pos,
+                    r=cutoff,
+                    batch=data.batch,
+                    max_num_neighbors=max_neighbors
+                )
+                # edge_index, _ = radius_graph_pbc(
+                #     data,
+                #     radius=cutoff,
+                #     pbc=[False, False, False],
+                #     max_num_neighbors_threshold=max_neighbors,
+                # )
+
+            j, i = edge_index
+            distance_vec = data.pos[j] - data.pos[i]
+
+            edge_dist = distance_vec.norm(dim=-1)
+            cell_offsets = torch.zeros(
+                edge_index.shape[1], 3, device=data.pos.device
+            )
+            cell_offset_distances = torch.zeros_like(
+                cell_offsets, device=data.pos.device
+            )
+
+            neighbors = compute_neighbors(data, edge_index)
+
+        return (
+            edge_index,
+            edge_dist,
+            distance_vec,
+            cell_offsets,
+            cell_offset_distances,
+            neighbors,
+        )
 
     @property
     def num_params(self):
@@ -459,9 +547,10 @@ class GemNetTEncoder(nn.Module):
 
     def forward(self, data):
         # (num_crysts, num_targets)
+        import pdb; pdb.set_trace()
         output = self.gemnet(
             z=None,
-            frac_coords=data.frac_coords,
+            coords=data.coords,
             atom_types=data.atom_types,
             num_atoms=data.num_atoms,
             lengths=data.lengths,

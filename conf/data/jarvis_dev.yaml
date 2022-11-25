@@ -1,22 +1,16 @@
-root_path: ${oc.env:PROJECT_ROOT}/data/perov_j
-prop: heat_ref
+root_path: ${oc.env:PROJECT_ROOT}/data/jarvis_dev
+prop: jarvis_energy_per_atom
+primitive: False
+otf_graph: True  # can't use CrystalNN on non-crystalline datasets
+graph_method: none  # no pre-graph calc in preprocessing
 num_targets: 1
-# prop: scaled_lattice
-# num_targets: 6
-otf_graph: True
-primitive: false
-graph_method: none
-lattice_scale_method: scale_length
-preprocess_workers: 30
-readout: mean
-max_atoms: 20
-eval_model_name: perovskite
-
+preprocess_workers: 16
+max_atoms: 25
+eval_model_name: jarvis
 
 train_max_epochs: 3000
 early_stopping_patience: 100000
 teacher_forcing_max_epoch: 1500
-
 
 datamodule:
   _target_: cdvae.pl_data.datamodule.CrystDataModule
@@ -49,14 +43,12 @@ datamodule:
         graph_method: ${data.graph_method}
         preprocess_workers: ${data.preprocess_workers}
 
-  scaler_path: ${data.root_path}
-
   num_workers:
     train: 0
     val: 0
     test: 0
 
   batch_size:
-    train: 512
-    val: 256
-    test: 128
+    train: 128
+    val: 64
+    test: 64
