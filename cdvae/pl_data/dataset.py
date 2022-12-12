@@ -7,13 +7,14 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
 from cdvae.common.utils import PROJECT_ROOT
-from cdvae.common.data_utils import preprocess_tensors
+from cdvae.common.data_utils import preprocess_tensors, load_pis
 
 
 class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
                  prop: ValueNode, primitive: ValueNode,
                  graph_method: ValueNode, preprocess_workers: ValueNode,
+                 pi_dir: ValueNode = None, pi_strategy: ValueNode = False,
                  scaler: ValueNode = None,
                  **kwargs):
         super().__init__()
@@ -26,6 +27,8 @@ class CrystDataset(Dataset):
 
         self.scaler = scaler
 
+        self.pi_strategy = pi_strategy
+        self.pi_data = load_pis(pi_dir, pi_strategy) if pi_strategy else None
         self.data = pd.read_csv(self.path)
 
         for col in ["coords", "elements"]:
@@ -39,6 +42,7 @@ class CrystDataset(Dataset):
 
     def __getitem__(self, index):
         data_dict = self.data.loc[index]
+        persistence_image = self.pi_data.loc[index] if self.pi_strategy else None
 
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])
@@ -47,6 +51,7 @@ class CrystDataset(Dataset):
             coords=torch.Tensor(data_dict["coords"]),
             atom_types=torch.Tensor(data_dict["elements"]).long(),
             num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
+            persistence_image=persistence_image,
             y=prop
         )
 

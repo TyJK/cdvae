@@ -1,0 +1,61 @@
+root_path: ${oc.env:PROJECT_ROOT}/data/qm9
+pi_strategy: plain
+prop: free_energy_298K
+primitive: False
+otf_graph: True
+graph_method: none # no pre-graph calc in preprocessing
+num_targets: 1
+preprocess_workers: 16
+max_atoms: 30
+eval_model_name: qm9
+
+train_max_epochs: 3000
+early_stopping_patience: 100000
+teacher_forcing_max_epoch: 1500
+
+datamodule:
+  _target_: cdvae.pl_data.datamodule.CrystDataModule
+
+  datasets:
+    train:
+      _target_: cdvae.pl_data.dataset.CrystDataset
+      name: Formation energy train
+      path: ${data.root_path}/train.csv
+      pi_dir: ${data.root_path}/persistence_tensors/
+      pi_strategy: ${data.pi_strategy}
+      prop: ${data.prop}
+      primitive: ${data.primitive}
+      graph_method: ${data.graph_method}
+      preprocess_workers: ${data.preprocess_workers}
+
+    val:
+      - _target_: cdvae.pl_data.dataset.CrystDataset
+        name: Formation energy val
+        path: ${data.root_path}/val.csv
+        pi_dir: ${data.root_path}/persistence_tensors/
+        pi_strategy: ${data.pi_strategy}
+        prop: ${data.prop}
+        primitive: ${data.primitive}
+        graph_method: ${data.graph_method}
+        preprocess_workers: ${data.preprocess_workers}
+
+    test:
+      - _target_: cdvae.pl_data.dataset.CrystDataset
+        name: Formation energy test
+        path: ${data.root_path}/test.csv
+        pi_dir: ${data.root_path}/persistence_tensors/
+        pi_strategy: ${data.pi_strategy}
+        prop: ${data.prop}
+        primitive: ${data.primitive}
+        graph_method: ${data.graph_method}
+        preprocess_workers: ${data.preprocess_workers}
+
+  num_workers:
+    train: 0
+    val: 0
+    test: 0
+
+  batch_size:
+    train: 128
+    val: 64
+    test: 64
