@@ -576,4 +576,7 @@ def load_pis(pi_dir: "PathLike", pi_strategy: str = "full"):
     keys = np.load(key_path)
     tensors = np.load(tensor_path)
 
+    if len(tensors.shape) < 4:
+        tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
+
     return {k: v for (k,v) in zip(keys, tensors)}

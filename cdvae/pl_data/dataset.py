@@ -51,7 +51,7 @@ class CrystDataset(Dataset):
 
     def __getitem__(self, index):
         data_dict = self.data.loc[index]
-        persistence_image = self.pi_data[index] if self.pi_strategy else None
+        persistence_image = torch.Tensor(self.pi_data[index]).float() if self.pi_strategy else None
 
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])

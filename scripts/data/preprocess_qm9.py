@@ -6,7 +6,7 @@ from cdvae.common.constants import ATOMIC_SYMBOL_TO_NUMBER_MAP
 
 def main():
     print("reading csv...")
-    qm9 = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/qm9-dec-11.csv", low_memory=False, nrows=10000)  # TODO (jwhite) remove
+    qm9 = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/qm9-dec-11.csv", low_memory=False)
 
     print("processing cols...")
     qm9["elements"] = qm9["elements"].apply(
@@ -28,9 +28,9 @@ def main():
     test = qm9.loc[test_idx]
 
     print("writing to disk...")
-    train.to_csv("~/Projects/mila/cdvae/data/qm9/train.csv")
-    val.to_csv("~/Projects/mila/cdvae/data/qm9/val.csv")
-    test.to_csv("~/Projects/mila/cdvae/data/qm9/test.csv")
+    train.to_csv("~/Projects/mila/cdvae/data/qm9/train.csv", index=False)
+    val.to_csv("~/Projects/mila/cdvae/data/qm9/val.csv", index=False)
+    test.to_csv("~/Projects/mila/cdvae/data/qm9/test.csv", index=False)
 
 
 if __name__ == "__main__":

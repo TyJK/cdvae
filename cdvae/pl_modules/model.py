@@ -23,6 +23,21 @@ def build_mlp(in_dim, hidden_dim, fc_num_layers, out_dim):
     return nn.Sequential(*mods)
 
 
+def build_conv(in_dim: int, image_hw: int):
+    """ Builds a CNN which predicts a left-upper-triangular image """
+    final_predicted_pixel_ct = image_hw**2
+
+    # TODO(jwhite) actually use CNNs
+    conv = nn.Sequential(
+        nn.Linear(in_dim, in_dim),
+        nn.Linear(in_dim, (in_dim + final_predicted_pixel_ct) // 2),
+        nn.Linear((in_dim + final_predicted_pixel_ct) // 2, final_predicted_pixel_ct),
+        nn.Unflatten(dim=1, unflattened_size=(image_hw, image_hw)),
+    )
+
+    return conv
+
+
 class BaseModule(pl.LightningModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
@@ -125,6 +140,9 @@ class CDVAE(BaseModule):
                                       self.hparams.fc_num_layers, self.hparams.max_atoms+1)
         self.fc_composition = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
+
+        self.conv_persist = build_conv(self.hparams.latent_dim, self.hparams.image_hw)
+
         # for property prediction.
         if self.hparams.predict_property:
             self.fc_property = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
@@ -185,7 +203,10 @@ class CDVAE(BaseModule):
         else:
             num_atoms = self.predict_num_atoms(z).argmax(dim=-1)
             composition_per_atom = self.predict_composition(z, num_atoms)
-        return num_atoms, composition_per_atom
+
+        persistence_image_pred = self.conv_persist(z) # TODO (jwhite) should we incorporate teacher forcing by num_atoms here? similar to lattice recon
+
+        return num_atoms, composition_per_atom, persistence_image_pred
 
     @torch.no_grad()
     def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None):
@@ -207,7 +228,7 @@ class CDVAE(BaseModule):
             all_atom_types = []
 
         # obtain key stats.
-        num_atoms, composition_per_atom = self.decode_stats(z, gt_num_atoms)
+        num_atoms, composition_per_atom, persistence_image_pred = self.decode_stats(z, gt_num_atoms)
         if gt_num_atoms is not None:
             num_atoms = gt_num_atoms
 
@@ -276,7 +297,7 @@ class CDVAE(BaseModule):
 
         mu, log_var, z = self.encode(batch)
 
-        pred_num_atoms, pred_composition_per_atom = self.decode_stats(z, batch.num_atoms)
+        pred_num_atoms, pred_composition_per_atom, persistence_image_pred = self.decode_stats(z, batch.num_atoms)
 
         # sample noise levels.
         noise_level = torch.randint(0, self.sigmas.size(0),
@@ -312,6 +333,7 @@ class CDVAE(BaseModule):
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
         composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch)
+        persistence_loss = self.persistence_loss(persistence_image_pred, batch)
         coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch)
 
@@ -322,7 +344,7 @@ class CDVAE(BaseModule):
         else:
             property_loss = 0.
 
-        return {
+        res = {
             'num_atom_loss': num_atom_loss,
             'composition_loss': composition_loss,
             'coord_loss': coord_loss,
@@ -339,6 +361,11 @@ class CDVAE(BaseModule):
             'rand_atom_types': rand_atom_types,
             'z': z,
         }
+
+        if persistence_loss:
+            res['persistence_loss'] = persistence_loss
+
+        return res
 
     def generate_rand_init(self, pred_composition_per_atom, pred_lengths,
                            pred_angles, num_atoms, batch):
@@ -404,6 +431,10 @@ class CDVAE(BaseModule):
 
     def num_atom_loss(self, pred_num_atoms, batch):
         return F.cross_entropy(pred_num_atoms, batch.num_atoms)
+
+    def persistence_loss(self, pi_pred, batch):
+        pi_true = batch.persistence_image
+        return F.mse_loss(pi_true, pi_pred) if (pi_true is not None) else None
 
     def property_loss(self, z, batch):
         return F.mse_loss(self.fc_property(z), batch.y)
@@ -476,6 +507,7 @@ class CDVAE(BaseModule):
 
     def compute_stats(self, batch, outputs, prefix):
         num_atom_loss = outputs['num_atom_loss']
+        persistence_loss = outputs.get('persistence_loss', 0)
         coord_loss = outputs['coord_loss']
         type_loss = outputs['type_loss']
         kld_loss = outputs['kld_loss']
@@ -484,6 +516,7 @@ class CDVAE(BaseModule):
 
         loss = (
             self.hparams.cost_natom * num_atom_loss +
+            self.hparams.cost_persistence * persistence_loss +
             self.hparams.cost_coord * coord_loss +
             self.hparams.cost_type * type_loss +
             self.hparams.beta * kld_loss +
@@ -498,6 +531,9 @@ class CDVAE(BaseModule):
             f'{prefix}_kld_loss': kld_loss,
             f'{prefix}_composition_loss': composition_loss,
         }
+
+        if persistence_loss > 0:
+            log_dict[f'{prefix}_persistence_loss'] = persistence_loss
 
         if prefix != 'train':
             # validation/test loss only has coord and type
