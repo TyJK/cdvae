@@ -170,7 +170,7 @@ def compute_neighbors(data, edge_index):
     num_neighbors = segment_coo(ones, edge_index[1], dim_size=data.natoms.sum())
 
     # Get number of neighbors per image
-    image_indpir = torch.zeros(data.num_atoms.shape[0] + 1, device=data.pos.device, dtype=torch.long)
+    image_indptr = torch.zeros(data.num_atoms.shape[0] + 1, device=data.pos.device, dtype=torch.long)
     image_indptr[1:] = torch.cumsum(data.natoms, dim=0)
     neighbors = segment_csr(num_neighbors, image_indptr)
 

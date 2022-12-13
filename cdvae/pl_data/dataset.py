@@ -1,6 +1,7 @@
 import hydra
 import omegaconf
 import torch
+import numpy as np
 import pandas as pd
 from omegaconf import ValueNode
 from torch.utils.data import Dataset
@@ -27,9 +28,17 @@ class CrystDataset(Dataset):
 
         self.scaler = scaler
 
+        self.data = pd.read_csv(self.path)
         self.pi_strategy = pi_strategy
         self.pi_data = load_pis(pi_dir, pi_strategy) if pi_strategy else None
-        self.data = pd.read_csv(self.path)
+
+        # filter data without pi data if active pi_strategy
+        if pi_strategy:
+            data_with_pi = set(self.pi_data.keys())
+            self.data = self.data[self.data["dataset_id"].apply(lambda idx: idx in data_with_pi)]
+            self.data.index = pd.RangeIndex(len(self.data))
+            # reindex pi_data to align with range index of data
+            self.pi_data = {idx: self.pi_data[data_id] for (idx, data_id) in self.data["dataset_id"].items()}
 
         for col in ["coords", "elements"]:
             self.data[col] = self.data[col].apply(eval)  # string-to-list op
@@ -42,7 +51,7 @@ class CrystDataset(Dataset):
 
     def __getitem__(self, index):
         data_dict = self.data.loc[index]
-        persistence_image = self.pi_data.loc[index] if self.pi_strategy else None
+        persistence_image = self.pi_data[index] if self.pi_strategy else None
 
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])
