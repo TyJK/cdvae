@@ -1,5 +1,5 @@
 root_path: ${oc.env:PROJECT_ROOT}/data/qm9
-pi_strategy: plain
+pi_strategy: False
 prop: free_energy_298K
 primitive: False
 otf_graph: True
