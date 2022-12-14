@@ -10,8 +10,8 @@ def main():
 
     print("processing cols...")
     qm9["elements"] = qm9["elements"].apply(
-        lambda elem_list: str(list(map(lambda sym: ATOMIC_SYMBOL_TO_NUMBER_MAP[sym], eval(elem_list)
-    ))))
+        lambda elem_list: list(map(lambda sym: ATOMIC_SYMBOL_TO_NUMBER_MAP[sym], eval(elem_list)
+    )))
 
     qm9["num_atoms"] = qm9["elements"].apply(len)
 
