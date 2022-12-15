@@ -1,12 +1,14 @@
 """ Converts MP and splits to train/val/test """
+import argparse
+import os
 
 import pandas as pd
 
 from cdvae.common.constants import ATOMIC_SYMBOL_TO_NUMBER_MAP
 
-def main():
+def main(args):
     print("reading csv...")
-    mp = pd.read_csv("~/Projects/mila/molecule-representation-tda/data/raw/mp-dec-14.csv", low_memory=False)
+    mp = pd.read_csv(args.data_path, low_memory=False)
 
     print("processing cols...")
     mp["elements"] = mp["elements"].apply(
@@ -30,10 +32,15 @@ def main():
     test = mp.loc[test_idx]
 
     print("writing to disk...")
-    train.to_csv("~/Projects/mila/cdvae/data/mp/train.csv", index=False)
-    val.to_csv("~/Projects/mila/cdvae/data/mp/val.csv", index=False)
-    test.to_csv("~/Projects/mila/cdvae/data/mp/test.csv", index=False)
+    train.to_csv(os.path.join(args.write_dir,"train.csv"), index=False)
+    val.to_csv(os.path.join(args.write_dir,"val.csv"), index=False)
+    test.to_csv(os.path.join(args.write_dir,"test.csv"), index=False)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data-path', default="~/Projects/mila/molecule-representation-tda/data/raw/mp-dec-14.csv")
+    parser.add_argument('--write-dir', default="~/Projects/mila/cdvae/data/mp/")
+    args = parser.parse_args()
+
+    main(args)

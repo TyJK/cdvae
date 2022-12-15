@@ -1,19 +1,19 @@
+import argparse
 import os
 import pickle
 from tqdm import tqdm
 
 import numpy as np
 
-def main():
-    pi_dir = "/home/jake/Projects/mila/molecule-representation-tda/data/raw/mp-pt/"
-    pi_files = os.listdir(pi_dir)
+def main(args):
+    pi_files = os.listdir(args.data_dir)
     pi_files.sort()
 
     all_keys = []
     all_pis = []
     all_pis_full = []
     for pif in tqdm(pi_files):
-        pif = open(os.path.join(pi_dir,pif), "rb")
+        pif = open(os.path.join(args.data_dir,pif), "rb")
         pi_dict = pickle.load(pif)
         pif.close()
 
@@ -37,15 +37,23 @@ def main():
     all_pis = np.concatenate(all_pis).astype(float)
     all_pis_full = np.concatenate(all_pis_full).astype(float)
 
-    with open("/home/jake/Projects/mila/cdvae/data/mp/persistence_tensors/all_keys.npy", "wb") as f:
+    if not os.path.exists(args.write_dir):
+        os.makedirs(args.write_dir)
+
+    with open(os.path.join(args.write_dir,"all_keys.npy"), "wb") as f:
         np.save(f, all_keys)
 
-    with open(os.path.join(root,"cdvae/data/qm9/persistence_tensors/all_pis.npy"), "wb") as f:
+    with open(os.path.join(args.write_dir,"all_pis.npy"), "wb") as f:
         np.save(f, all_pis_full)
 
-    with open("/home/jake/Projects/mila/cdvae/data/mp/persistence_tensors/all_pis_plain.npy", "wb") as f:
+    with open(os.path.join(args.write_dir,"all_pis_plain.npy"), "wb") as f:
         np.save(f, all_pis)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data-dir', default="/home/jake/Projects/mila/molecule-representation-tda/data/raw/mp-pt/")
+    parser.add_argument('--write-dir', default="/home/jake/Projects/mila/cdvae/data/mp/persistence_tensors/")
+    args = parser.parse_args()
+
+    main(args)
