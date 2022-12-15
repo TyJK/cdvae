@@ -287,9 +287,9 @@ class CDVAE(BaseModule):
         samples = self.langevin_dynamics(z, ld_kwargs)
         return samples
 
-    def forward(self, batch, teacher_forcing, training):
+    def forward(self, batch, teacher_forcing, training, loss_reduction='mean'):
         # solves an issue of missing batch indices of unknown cause
-        if not batch.batch:
+        if batch.batch is None:
             batch.batch = torch.repeat_interleave(
                 torch.arange(len(batch.num_atoms), device=batch.num_atoms.device),
                 repeats=batch.num_atoms
@@ -331,18 +331,18 @@ class CDVAE(BaseModule):
         pred_coord_diff, pred_atom_types = self.decoder(z, batch_cp)
 
         # compute loss.
-        num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
-        composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch)
-        persistence_loss = self.persistence_loss(persistence_image_pred, batch)
-        coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch)
-        type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch)
+        num_atom_loss = self.num_atom_loss(pred_num_atoms, batch, reduction=loss_reduction)
+        composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch, reduction=loss_reduction)
+        persistence_loss = self.persistence_loss(persistence_image_pred, batch, reduction=loss_reduction)
+        coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch, reduction=loss_reduction)
+        type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch, reduction=loss_reduction)
 
-        kld_loss = self.kld_loss(mu, log_var)
+        kld_loss = self.kld_loss(mu, log_var, reduction=loss_reduction)
 
         if self.hparams.predict_property:
-            property_loss = self.property_loss(z, batch)
+            property_loss = self.property_loss(z, batch, reduction=loss_reduction)
         else:
-            property_loss = 0.
+            property_loss = torch.full(kld_loss.shape, np.nan, device=kld_loss.device)
 
         res = {
             'num_atom_loss': num_atom_loss,
@@ -429,23 +429,31 @@ class CDVAE(BaseModule):
         pred_composition_per_atom = self.fc_composition(z_per_atom)
         return pred_composition_per_atom
 
-    def num_atom_loss(self, pred_num_atoms, batch):
-        return F.cross_entropy(pred_num_atoms, batch.num_atoms)
+    def num_atom_loss(self, pred_num_atoms, batch, reduction='mean'):
+        return F.cross_entropy(pred_num_atoms, batch.num_atoms, reduction=reduction)
 
-    def persistence_loss(self, pi_pred, batch):
+    def persistence_loss(self, pi_pred, batch, reduction='mean'):
         pi_true = batch.persistence_image
-        return F.mse_loss(pi_true, pi_pred) if (pi_true is not None) else None
+        return F.mse_loss(pi_true, pi_pred, reduction=reduction) if (pi_true is not None) else None
 
-    def property_loss(self, z, batch):
-        return F.mse_loss(self.fc_property(z), batch.y)
+    def property_loss(self, z, batch, reduction='mean'):
+        return F.mse_loss(self.fc_property(z), batch.y, reduction=reduction)
 
-    def composition_loss(self, pred_composition_per_atom, target_atom_types, batch):
+    def composition_loss(self, pred_composition_per_atom, target_atom_types, batch, reduction='mean'):
         target_atom_types = target_atom_types - 1
         loss = F.cross_entropy(pred_composition_per_atom,
                                target_atom_types, reduction='none')
-        return scatter(loss, batch.batch, reduce='mean').mean()
 
-    def coord_loss(self, pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch):
+        loss = scatter(loss, batch.batch, reduce='mean')
+
+        if reduction == 'mean':
+            loss = loss.mean()
+        elif reduction == 'sum':
+            loss = loss.sum()
+
+        return loss
+
+    def coord_loss(self, pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch, reduction='mean'):
         target_coords = batch.coords
         target_cart_coord_diff = target_coords-noisy_coords
 
@@ -456,20 +464,39 @@ class CDVAE(BaseModule):
         loss_per_atom = torch.sum((target_cart_coord_diff - pred_coord_diff)**2, dim=1)
         loss_per_atom = 0.5 * loss_per_atom * used_sigmas_per_atom**2
 
-        return scatter(loss_per_atom, batch.batch, reduce='mean').mean()
+        loss = scatter(loss_per_atom, batch.batch, reduce='mean')
+
+        if reduction == 'mean':
+            loss = loss.mean()
+        elif reduction == 'sum':
+            loss = loss.sum()
+
+        return loss
 
     def type_loss(self, pred_atom_types, target_atom_types,
-                  used_type_sigmas_per_atom, batch):
+                  used_type_sigmas_per_atom, batch, reduction='mean'):
         target_atom_types = target_atom_types - 1
         loss = F.cross_entropy(
             pred_atom_types, target_atom_types, reduction='none')
         # rescale loss according to noise
         loss = loss / used_type_sigmas_per_atom
-        return scatter(loss, batch.batch, reduce='mean').mean()
+        loss = scatter(loss, batch.batch, reduce='mean')
 
-    def kld_loss(self, mu, log_var):
-        kld_loss = torch.mean(
-            -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1), dim=0)
+        if reduction == 'mean':
+            loss = loss.mean()
+        elif reduction == 'sum':
+            loss = loss.sum()
+
+        return loss
+
+    def kld_loss(self, mu, log_var, reduction='mean'):
+        kld_loss = -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1)
+
+        if reduction == 'mean':
+            kld_loss = kld_loss.mean(),
+        elif reduction == 'sum':
+            kld_loss = kld_loss.sum()
+
         return kld_loss
 
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
