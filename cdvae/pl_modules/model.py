@@ -493,7 +493,7 @@ class CDVAE(BaseModule):
         kld_loss = -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1)
 
         if reduction == 'mean':
-            kld_loss = kld_loss.mean(),
+            kld_loss = kld_loss.mean()
         elif reduction == 'sum':
             kld_loss = kld_loss.sum()
 
