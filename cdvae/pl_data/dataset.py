@@ -57,6 +57,7 @@ class CrystDataset(Dataset):
         prop = self.scaler.transform(data_dict[self.prop]).float()
 
         data = Data(
+            dataset_id=data_dict["dataset_id"],
             coords=torch.Tensor(data_dict["coords"]),
             atom_types=torch.Tensor(data_dict["elements"]).long(),
             num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
