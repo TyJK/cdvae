@@ -437,7 +437,7 @@ class CDVAE(BaseModule):
         return F.mse_loss(pi_true, pi_pred, reduction=reduction) if (pi_true is not None) else None
 
     def property_loss(self, z, batch, reduction='mean'):
-        return F.mse_loss(self.fc_property(z), batch.y, reduction=reduction)
+        return F.mse_loss(self.fc_property(z).flatten(), batch.y, reduction=reduction)
 
     def composition_loss(self, pred_composition_per_atom, target_atom_types, batch, reduction='mean'):
         target_atom_types = target_atom_types - 1
