@@ -1,19 +1,21 @@
 import hydra
 import omegaconf
 import torch
+import numpy as np
 import pandas as pd
 from omegaconf import ValueNode
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
 from cdvae.common.utils import PROJECT_ROOT
-from cdvae.common.data_utils import preprocess_tensors
+from cdvae.common.data_utils import preprocess_tensors, load_pis
 
 
 class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
                  prop: ValueNode, primitive: ValueNode,
                  graph_method: ValueNode, preprocess_workers: ValueNode,
+                 pi_dir: ValueNode = None, pi_strategy: ValueNode = False,
                  scaler: ValueNode = None,
                  **kwargs):
         super().__init__()
@@ -27,6 +29,16 @@ class CrystDataset(Dataset):
         self.scaler = scaler
 
         self.data = pd.read_csv(self.path)
+        self.pi_strategy = pi_strategy
+        self.pi_data = load_pis(pi_dir, pi_strategy) if pi_strategy else None
+
+        # filter data without pi data if active pi_strategy
+        if pi_strategy:
+            data_with_pi = set(self.pi_data.keys())
+            self.data = self.data[self.data["dataset_id"].apply(lambda idx: idx in data_with_pi)]
+            self.data.index = pd.RangeIndex(len(self.data))
+            # reindex pi_data to align with range index of data
+            self.pi_data = {idx: self.pi_data[data_id] for (idx, data_id) in self.data["dataset_id"].items()}
 
         for col in ["coords", "elements"]:
             self.data[col] = self.data[col].apply(eval)  # string-to-list op
@@ -39,14 +51,17 @@ class CrystDataset(Dataset):
 
     def __getitem__(self, index):
         data_dict = self.data.loc[index]
+        persistence_image = torch.Tensor(self.pi_data[index]).float() if self.pi_strategy else None
 
         # scaler is set in DataModule set stage
-        prop = self.scaler.transform(data_dict[self.prop])
+        prop = self.scaler.transform(data_dict[self.prop]).float()
 
         data = Data(
+            dataset_id=data_dict["dataset_id"],
             coords=torch.Tensor(data_dict["coords"]),
             atom_types=torch.Tensor(data_dict["elements"]).long(),
             num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
+            persistence_image=persistence_image,
             y=prop
         )
 

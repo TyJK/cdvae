@@ -46,7 +46,7 @@ def load_envs(env_file: Optional[str] = None) -> None:
     """
     outcome = dotenv.load_dotenv(dotenv_path=env_file, override=True)
     if not outcome:
-        raise ValueError("dotenv.load_dotenv failed to load env vars")
+        print("WARNING: dotenv.load_dotenv failed to load env vars")
 
 
 STATS_KEY: str = "stats"
