@@ -362,7 +362,7 @@ class CDVAE(BaseModule):
             'z': z,
         }
 
-        if persistence_loss:
+        if persistence_loss is not None:
             res['persistence_loss'] = persistence_loss
 
         return res
