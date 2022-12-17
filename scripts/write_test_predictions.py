@@ -25,9 +25,16 @@ def main(model_ckpt_path: os.PathLike, pred_write_path: os.PathLike):
         model_path=Path(model_ckpt_path), load_data=True, testing=True
     )
 
+    infer_on_gpu = torch.cuda.is_available()
+
+    if infer_on_gpu:
+        model = model.to("cuda")
+
     print("generating predictions on test set...")
     batch_results = {}
     for batch in tqdm(loader):
+        if infer_on_gpu:
+            batch = batch.to("cuda")
         with torch.no_grad():
             res = model(batch, teacher_forcing=False, training=False, loss_reduction='none')
             res["num_atoms"] = batch["num_atoms"]
@@ -35,7 +42,7 @@ def main(model_ckpt_path: os.PathLike, pred_write_path: os.PathLike):
 
             for key in SAVE_KEYS:
                 key_vals = batch_results.get(key,[])
-                new_val = res[key].numpy() if key != "dataset_id" else res[key]
+                new_val = res[key].cpu().numpy() if key != "dataset_id" else res[key]
                 key_vals.append(new_val)
                 batch_results[key] = key_vals
 
