@@ -30,7 +30,7 @@ class CrystDataset(Dataset):
 
         self.data = pd.read_csv(self.path)
         self.pi_strategy = pi_strategy
-        self.pi_data = load_pis(pi_dir, pi_strategy) if pi_strategy else None
+        self.pi_data = load_pis(pi_dir, pi_strategy) if pi_strategy != "none" else None
 
         # filter data without pi data if active pi_strategy
         if pi_strategy != 'none':
