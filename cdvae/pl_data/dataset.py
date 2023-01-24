@@ -43,8 +43,8 @@ class CrystDataset(Dataset):
         for col in ["coords", "elements"]:
             self.data[col] = self.data[col].apply(eval)  # string-to-list op
 
-        self.data = self.data[["dataset_id","n_atoms","coords","elements", prop]]
-        self.data["n_atoms"] = self.data["elements"].apply(len)
+        self.data = self.data[["dataset_id","num_atoms","coords","elements", prop]]
+        self.data["num_atoms"] = self.data["elements"].apply(len)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -61,7 +61,7 @@ class CrystDataset(Dataset):
             dataset_id=data_dict["dataset_id"],
             coords=torch.Tensor(data_dict["coords"]),
             atom_types=torch.Tensor(data_dict["elements"]).long(),
-            n_atoms=torch.Tensor([data_dict["n_atoms"]]).long(),
+            num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
             persistence_image=pi,
             y=prop
         )
