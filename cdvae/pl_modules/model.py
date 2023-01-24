@@ -333,7 +333,11 @@ class CDVAE(BaseModule):
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch, reduction=loss_reduction)
         composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch, reduction=loss_reduction)
-        persistence_loss = self.persistence_loss(persistence_image_pred, batch, reduction=loss_reduction)
+
+        if self.hparams.pi_strategy != "none":
+            persistence_loss = self.persistence_loss(persistence_image_pred, batch, reduction=loss_reduction)
+        else:
+            persistence_loss = None
         coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch, reduction=loss_reduction)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch, reduction=loss_reduction)
 
