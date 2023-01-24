@@ -16,7 +16,6 @@ def main(args):
     )))
 
     data["n_atoms"] = data["elements"].apply(len)
-    del data["n_atoms"]
 
     data = data[data["n_atoms"] <= 80]  # trim largest molecules out
 
