@@ -82,6 +82,7 @@ chemical_symbols = [
     'Lv', 'Ts', 'Og']
 
 
+
 CrystalNN = local_env.CrystalNN(
     distance_cutoffs=None, x_diff_weight=-1, porous_adjustment=False)
 
@@ -572,11 +573,10 @@ def load_pis(pi_dir: "PathLike", pi_strategy: str = "full"):
     if pi_strategy == "none":
         return None
     elif pi_strategy == "plain":
-        tensor_path = os.path.join(pi_dir,f"all_pis_plain.npy")
-        tensors = np.load(tensor_path)
+        tensor_path = os.path.join(pi_dir,"all_pis_plain.npy")
     elif pi_strategy == "full":
-        tensor_path = os.path.join(pi_dir,f"all_pis.npy")
-        tensors = np.load(tensor_path)
+        tensor_path = os.path.join(pi_dir,"all_pis.npy")
+    tensors = np.load(tensor_path)
 
     if len(tensors.shape) < 4:
         tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
