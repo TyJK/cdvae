@@ -15,10 +15,10 @@ def main(args):
         lambda elem_list: list(map(lambda sym: ATOMIC_SYMBOL_TO_NUMBER_MAP[sym], eval(elem_list)
     )))
 
-    data["num_atoms"] = data["elements"].apply(len)
+    data["n_atoms"] = data["elements"].apply(len)
     del data["n_atoms"]
 
-    data = data[data["num_atoms"] <= 80]  # trim largest molecules out
+    data = data[data["n_atoms"] <= 80]  # trim largest molecules out
 
     data = data.round(8)  # smooths out compute tails
 
