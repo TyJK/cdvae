@@ -33,9 +33,9 @@ def main(args):
         all_pis.append(np.array(pis))
         all_pis_full.append(np.array(pis_full))
 
-    all_keys.extend(keys)
-    all_pis.append(np.array(pis))
-    all_pis_full.append(np.array(pis_full))
+    all_keys = np.array(all_keys)
+    all_pis = np.concatenate(all_pis).astype(float)
+    all_pis_full = np.concatenate(all_pis_full).astype(float)
 
     if not os.path.exists(args.write_dir):
         os.makedirs(args.write_dir)
