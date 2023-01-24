@@ -51,17 +51,18 @@ class CrystDataset(Dataset):
 
     def __getitem__(self, index):
         data_dict = self.data.loc[index]
-        persistence_image = torch.Tensor(self.pi_data[index]).float() if self.pi_strategy else None
-
+        
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop]).float()
 
+        pi = torch.Tensor(self.pi_data[index]).float() if self.pi_strategy != 'none' else None
+       
         data = Data(
             dataset_id=data_dict["dataset_id"],
             coords=torch.Tensor(data_dict["coords"]),
             atom_types=torch.Tensor(data_dict["elements"]).long(),
             num_atoms=torch.Tensor([data_dict["num_atoms"]]).long(),
-            persistence_image=persistence_image,
+            persistence_image=pi,
             y=prop
         )
 
