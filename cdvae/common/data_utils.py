@@ -563,20 +563,21 @@ def load_pis(pi_dir: "PathLike", pi_strategy: str = "full"):
 
       Args:
        * pi_dir: where the tensors are written on disk
-       * pi_strategy: either "full" (for enriched PT's) or "plain" (for plain PT only)
+       * pi_strategy: either "none" for no PI,  "full" for PT's) or "plain" for single PI
 
       Returns: a dict which maps data ID keys to associated PT's
     """
-    if pi_strategy not in ["full", "plain"]:
-        raise ValueError(f"pi_strategy argument should be either 'full' or 'plain'; {pi_strategy} passed")
 
-    key_path = os.path.join(pi_dir,"all_keys.npy")
-    tensor_path = os.path.join(pi_dir,f"all_pis_{pi_strategy}.npy")
+    if pi_strategy == "none":
+        return None
+    else:
+        key_path = os.path.join(pi_dir,"all_keys.npy")
+        tensor_path = os.path.join(pi_dir,f"all_pis_{pi_strategy}.npy")
 
-    keys = np.load(key_path)
-    tensors = np.load(tensor_path)
+        keys = np.load(key_path)
+        tensors = np.load(tensor_path)
 
-    if len(tensors.shape) < 4:
-        tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
+        if len(tensors.shape) < 4:
+            tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
 
-    return {k: v for (k,v) in zip(keys, tensors)}
+        return {k: v for (k,v) in zip(keys, tensors)}
