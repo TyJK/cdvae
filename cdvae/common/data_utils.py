@@ -567,17 +567,18 @@ def load_pis(pi_dir: "PathLike", pi_strategy: str = "full"):
 
       Returns: a dict which maps data ID keys to associated PT's
     """
-
+    key_path = os.path.join(pi_dir,"all_keys.npy")
+    keys = np.load(key_path)
     if pi_strategy == "none":
         return None
-    else:
-        key_path = os.path.join(pi_dir,"all_keys.npy")
-        tensor_path = os.path.join(pi_dir,f"all_pis_{pi_strategy}.npy")
-
-        keys = np.load(key_path)
+    elif pi_strategy == "plain":
+        tensor_path = os.path.join(pi_dir,f"all_pis_plain.npy")
+        tensors = np.load(tensor_path)
+    elif pi_strategy == "full":
+        tensor_path = os.path.join(pi_dir,f"all_pis.npy")
         tensors = np.load(tensor_path)
 
-        if len(tensors.shape) < 4:
-            tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
+    if len(tensors.shape) < 4:
+        tensors = np.expand_dims(tensors, axis=1)  # add a channel dimension
 
-        return {k: v for (k,v) in zip(keys, tensors)}
+    return {k: v for (k,v) in zip(keys, tensors)}
