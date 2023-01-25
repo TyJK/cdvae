@@ -335,6 +335,7 @@ class CDVAE(BaseModule):
         composition_loss = self.composition_loss(pred_composition_per_atom, batch.atom_types, batch, reduction=loss_reduction)
         
         persistence_loss = self.persistence_loss(persistence_image_pred, batch, reduction=loss_reduction)
+        # persistence_loss = None
 
         coord_loss = self.coord_loss(pred_coord_diff, noisy_coords, used_sigmas_per_atom, batch, reduction=loss_reduction)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types, used_type_sigmas_per_atom, batch, reduction=loss_reduction)
@@ -435,9 +436,8 @@ class CDVAE(BaseModule):
         return F.cross_entropy(pred_num_atoms, batch.num_atoms, reduction=reduction)
 
     def persistence_loss(self, pi_pred, batch, reduction='mean'):
-        pi_true = batch.persistence_image
         
-        return F.mse_loss(pi_true, pi_pred, reduction=reduction) if pi_true is not None else None
+        return F.mse_loss(batch.persistence_image, pi_pred, reduction=reduction)
 
     def property_loss(self, z, batch, reduction='mean'):
         return F.mse_loss(self.fc_property(z).flatten(), batch.y, reduction=reduction)
